@@ -49,7 +49,7 @@ function main() {
   const data = {
     tolerance: 0.15,
     distance: .4,
-    divisions: 16,
+    divisions: 60,
     startAngle: 0,
     endAngle: Math.PI * 2,
     capStart: true,
@@ -407,12 +407,7 @@ function main() {
   }
 
   webglLessonsUI.setupUI(document.querySelector("#ui"), data, [
-    { type: "slider",   key: "distance",   change: update, min: 0.001, max: 5,           precision: 3, step: 0.001, },
-    { type: "slider",   key: "divisions",  change: update, min: 1    , max: 60,                                     },
-    { type: "slider",   key: "startAngle", change: update, min: 0    , max: Math.PI * 2, precision: 3, step: 0.001, uiMult: 180 / Math.PI, uiPrecision: 0  },
-    { type: "slider",   key: "endAngle",   change: update, min: 0    , max: Math.PI * 2, precision: 3, step: 0.001, uiMult: 180 / Math.PI, uiPrecision: 0  },
-    { type: "checkbox", key: "capStart",   change: update, },
-    { type: "checkbox", key: "capEnd",     change: update, },
+    { type: "slider",   key: "distance",   change: update, min: 0.001, max: 2,           precision: 3, step: 0.001, },
     { type: "checkbox", key: "triangles",  change: render, },
   ]);
 
