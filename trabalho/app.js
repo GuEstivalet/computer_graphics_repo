@@ -2,36 +2,44 @@
 
 const vs = `#version 300 es
 in vec4 a_position;
-in vec2 a_texcoord;
+in vec3 a_normal; 
 
 uniform mat4 u_matrix;
+uniform mat4 u_worldMatrix;
 
-out vec2 v_texcoord;
+out vec3 v_normal;
 
 void main() {
-  // Multiply the position by the matrix.
   gl_Position = u_matrix * a_position;
-
-  // Pass the texcoord to the fragment shader.
-  v_texcoord = a_texcoord;
+  // Passa a normal para o fragment shader para calcular a luz
+  v_normal = mat3(u_worldMatrix) * a_normal;
 }
 `;
+
 const fs = `#version 300 es
 precision highp float;
-
-// Passed in from the vertex shader.
-in vec2 v_texcoord;
-
+in vec3 v_normal;
 out vec4 outColor;
 
-uniform sampler2D u_texture;
-
 void main() {
-   outColor = texture(u_texture, v_texcoord);
+  vec3 normal = normalize(v_normal);
+  vec3 lightDir = normalize(vec3(1, 1, 1)); // Direção da luz
+  float light = dot(normal, lightDir) * 0.5 + 0.5; // Luz básica
+  outColor = vec4(vec3(0.1, 0.5, 0.2) * light, 1.0); // Cor esverdeada
 }
 `;
 
 const svg = "m0,-100 c55,0 100,45 100,100 c0,55 -45,100 -100,100";
+
+// Randon noise
+function getRandomNoise() {
+  return Math.random() * 2 - 1;
+}
+
+// Perlin noise
+function getPerlinLike(x, y, z, seed) {
+  return (Math.sin(x * seed) * Math.cos(y * seed) + Math.sin(z * seed)) * 0.5;
+}
 
 function main() {
   const curvePoints = parseSVGPath(svg);
@@ -54,7 +62,11 @@ function main() {
     endAngle: Math.PI * 2,
     capStart: true,
     capEnd: true,
-    triangles:true
+    triangles:true,
+    // Referentes ao ruído
+    noiseType: 'none', 
+    noiseIntensity: 50,
+    noiseSeed: 5.0
   };
 
   function generateMesh(bufferInfo) {
@@ -87,8 +99,8 @@ function main() {
   // compiles shaders, links program and looks up locations
   const programInfo = twgl.createProgramInfo(gl, [vs, fs]);
 
-  const texInfo = criaTexSolida(gl, 250, 50, 50, 255);
-
+  let autoRotationY = 0;
+  let mouseRotationMatrix = m4.identity();
   let worldMatrix = m4.identity();
   let projectionMatrix;
   let extents;
@@ -102,6 +114,7 @@ function main() {
     render();
   }
   update();
+  requestAnimationFrame(renderLoop);
 
   function render() {
     twgl.resizeCanvasToDisplaySize(gl.canvas, window.devicePixelRatio);
@@ -143,11 +156,39 @@ function main() {
     // calls gl.uniformXXX, gl.activeTexture, gl.bindTexture
     twgl.setUniforms(programInfo, {
       u_matrix: m4.multiply(viewProjectionMatrix, worldMatrix),
-      u_texture: texInfo.texture,
+      u_worldMatrix: worldMatrix,
     });
 
     // calls gl.drawArrays or gl.drawElements.
     twgl.drawBufferInfo(gl, bufferInfo, data.triangles ? gl.TRIANGLE : gl.LINES);
+  }
+
+  function getCenter(extents) {
+  return [
+    (extents.min[0] + extents.max[0]) * 0.5,
+    (extents.min[1] + extents.max[1]) * 0.5,
+    (extents.min[2] + extents.max[2]) * 0.5,
+  ];
+}
+
+  function renderLoop(time) {
+  time *= 0.001;
+  autoRotationY = time * 0.4;
+
+  const center = getCenter(extents);
+
+  const autoMatrix = m4.yRotation(autoRotationY);
+
+  // T(-center) → Rot → T(center)
+  let m = m4.translation(-center[0], -center[1], -center[2]);
+  m = m4.multiply(autoMatrix, m);
+  m = m4.multiply(mouseRotationMatrix, m);
+  m = m4.multiply(m4.translation(center[0], center[1], center[2]), m);
+
+  worldMatrix = m;
+
+  render();
+  requestAnimationFrame(renderLoop);
   }
 
   function getExtents(positions) {
@@ -350,6 +391,7 @@ function main() {
     return outPoints;
   }
 
+  // RESOLVER PROBLEMA DO RUIDO
   // rotates around Y axis.
   function lathePoints(points,
                        startAngle,   // angle to start at (ie 0)
@@ -357,59 +399,100 @@ function main() {
                        numDivisions, // how many quads to make around
                        capStart,     // true to cap the top
                        capEnd) {     // true to cap the bottom
-    const positions = [];
-    const texcoords = [];
-    const indices = [];
+  const positions = [];
+  const texcoords = [];
+  const indices = [];
+  const normals = [];
 
-    const vOffset = capStart ? 1 : 0;
-    const pointsPerColumn = points.length + vOffset + (capEnd ? 1 : 0);
-    const quadsDown = pointsPerColumn - 1;
+  const vOffset = capStart ? 1 : 0;
+  const pointsPerColumn = points.length + vOffset + (capEnd ? 1 : 0);
+  const quadsDown = pointsPerColumn - 1;
 
-    // generate points
-    for (let division = 0; division <= numDivisions; ++division) {
-      const u = division / numDivisions;
-      const angle = lerp(startAngle, endAngle, u);
-      const mat = m4.yRotation(angle);
-      if (capStart) {
-        // add point on Y access at start
-        positions.push(0, points[0][1], 0);
-        texcoords.push(u, 0);
-      }
-      points.forEach((p, ndx) => {
-        const tp = m4.transformPoint(mat, [...p, 0]);
-        positions.push(tp[0], tp[1], tp[2]);
-        // note: this V is wrong. It's spacing by ndx instead of distance along curve
-        const v = (ndx + vOffset) / quadsDown;
-        texcoords.push(u, v); // v?
-      });
-      if (capEnd) {
-        // add point on Y access at end
-        positions.push(0, points[points.length - 1][1], 0);
-        texcoords.push(u, 1);
-      }
+  // -------------------------
+  // GERA VÉRTICES (SEM duplicar o último meridiano)
+  // -------------------------
+  for (let division = 0; division < numDivisions; ++division) {
+    const u = division / numDivisions;
+    const angle = lerp(startAngle, endAngle, u);
+    const mat = m4.yRotation(angle);
+
+    if (capStart) {
+      positions.push(0, points[0][1], 0);
+      normals.push(0, 1, 0);
+      texcoords.push(u, 0);
     }
 
-    // generate indices
-    for (let division = 0; division < numDivisions; ++division) {
-      const column1Offset = division * pointsPerColumn;
-      const column2Offset = column1Offset + pointsPerColumn;
-      for (let quad = 0; quad < quadsDown; ++quad) {
-        indices.push(column1Offset + quad, column1Offset + quad + 1, column2Offset + quad);
-        indices.push(column1Offset + quad + 1, column2Offset + quad + 1, column2Offset + quad);
-      }
-    }
+    points.forEach((p, ndx) => {
+      let noiseVal = 0;
 
-    return {
-      position: positions,
-      texcoord: texcoords,
-      indices: indices,
-    };
+      if (data.noiseType === 'perlin') {
+        noiseVal = getPerlinLike(
+          Math.cos(angle) * p[0],
+          p[1],
+          Math.sin(angle) * p[0],
+          data.noiseSeed
+        );
+      } else if (data.noiseType === 'random') {
+        noiseVal = Math.random() * 2 - 1;
+      }
+
+      const displacement = noiseVal * data.noiseIntensity;
+      const radius = p[0] + displacement;
+
+      const deformedPoint = [radius, p[1], 0];
+      const tp = m4.transformPoint(mat, deformedPoint);
+
+      positions.push(tp[0], tp[1], tp[2]);
+
+      // normal radial (correta para deslocamento radial)
+      const len = Math.hypot(tp[0], tp[1], tp[2]) || 1;
+      normals.push(tp[0] / len, tp[1] / len, tp[2] / len);
+
+      const v = (ndx + vOffset) / quadsDown;
+      texcoords.push(u, v);
+    });
+
+    if (capEnd) {
+      positions.push(0, points[points.length - 1][1], 0);
+      normals.push(0, -1, 0);
+      texcoords.push(u, 1);
+    }
   }
 
-  webglLessonsUI.setupUI(document.querySelector("#ui"), data, [
-    { type: "slider",   key: "distance",   change: update, min: 0.001, max: 2,           precision: 3, step: 0.001, },
-    { type: "checkbox", key: "triangles",  change: render, },
-  ]);
+  // -------------------------
+  // GERA ÍNDICES (com wrap → fecha a costura)
+  // -------------------------
+  for (let division = 0; division < numDivisions; ++division) {
+    const nextDivision = (division + 1) % numDivisions;
+
+    const column1Offset = division * pointsPerColumn;
+    const column2Offset = nextDivision * pointsPerColumn;
+
+    for (let quad = 0; quad < quadsDown; ++quad) {
+      const a = column1Offset + quad;
+      const b = column2Offset + quad;
+      const c = column1Offset + quad + 1;
+      const d = column2Offset + quad + 1;
+
+      indices.push(a, c, b);
+      indices.push(c, d, b);
+    }
+  }
+
+  return {
+    position: positions,
+    normal: normals,
+    texcoord: texcoords,
+    indices: indices,
+  };
+}
+
+webglLessonsUI.setupUI(document.querySelector("#ui"), data, [
+  { type: "slider",   key: "distance",       change: update, min: 0.001, max: 2, precision: 3, step: 0.001 },
+  { type: "option",   key: "noiseType",      change: update, options: ['none', 'random', 'perlin'] },
+  { type: "slider", key: "noiseIntensity", min: 0, max: 500, step: 10 },
+  { type: "checkbox", key: "triangles",      change: render },
+]);
 
   gl.canvas.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -436,19 +519,20 @@ function main() {
   }
 
   function rotateCamera(e) {
-    if (moving) {
-      const pos = getRelativeMousePosition(gl.canvas, e);
-      const size = [4 / gl.canvas.width, 4 / gl.canvas.height];
-      const delta = v2.mult(v2.sub(lastPos, pos), size);
+if (moving) {
+    const pos = getRelativeMousePosition(gl.canvas, e);
+    const size = [4 / gl.canvas.width, 4 / gl.canvas.height];
+    const delta = v2.mult(v2.sub(lastPos, pos), size);
 
-      // this is bad but it works for a basic case so phffttt
-      worldMatrix = m4.multiply(m4.xRotation(delta[1] * 5), worldMatrix);
-      worldMatrix = m4.multiply(m4.yRotation(delta[0] * 5), worldMatrix);
+    // 1. Cria as matrizes de rotação incremental
+    let incrementalRotation = m4.xRotation(delta[1] * 5);
+    incrementalRotation = m4.multiply(incrementalRotation, m4.yRotation(delta[0] * 5));
 
-      lastPos = pos;
+    // 2. MULTIPLICAÇÃO INVERSA: Aplica a rotação no espaço local do objeto
+    mouseRotationMatrix = m4.multiply(incrementalRotation, mouseRotationMatrix);
 
-      render();
-    }
+    lastPos = pos;
+  }
   }
 
   function stopRotateCamera() {
@@ -586,6 +670,7 @@ const v2 = (function() {
     distanceToSegmentSq: distanceToSegmentSq,
   };
 }());
+
 
 main();
 
