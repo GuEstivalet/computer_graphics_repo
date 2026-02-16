@@ -17,14 +17,6 @@ export function basisFromUp(up) {
   return { right, up, fwd };
 }
 
-// pega um "up" aleatório estável
-export function fibonacciDir(i, n) {
-  const phi = Math.PI * (3 - Math.sqrt(5));
-  const y = 1 - (i / (n - 1)) * 2;
-  const r = Math.sqrt(Math.max(0, 1 - y*y));
-  const t = phi * i;
-  return [Math.cos(t) * r, y, Math.sin(t) * r];
-}
 
 // altura do terreno para um "up" (use sua displacedRadius/fbm3 se já tem)
 export function terrainRadiusAtUp(displacedRadiusFn, up, data) {

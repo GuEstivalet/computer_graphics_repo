@@ -45,7 +45,6 @@ export function parseOBJ(objText) {
     }
   }
 
-  // ✅ PARA TWGL + attribPrefix: use position/normal/texcoord
   return {
     position: { numComponents: 3, data: outPos },
     normal:   { numComponents: 3, data: outNrm },

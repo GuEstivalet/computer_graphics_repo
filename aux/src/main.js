@@ -2,7 +2,7 @@
 "use strict";
 
 import { Renderer } from "./Renderer.js";
-import { vsPlanet, fsPlanet, vsWater, fsWater, vsBg, fsBg } from "./shaders.js";
+import { vsPlanet, fsPlanet, vsWater, fsWater, vsBg, fsBg, vsPollen, fsPollen } from "./shaders.js";
 import { v3normalize } from "./Placement.js";
 import { displacedRadius } from "./noise.js";
 
@@ -157,6 +157,8 @@ function main() {
   const programPlanet = twgl.createProgramInfo(gl, [vsPlanet, fsPlanet]);
   const programWater = twgl.createProgramInfo(gl, [vsWater, fsWater]);
   const programBg = twgl.createProgramInfo(gl, [vsBg, fsBg]);
+  const programPollen = twgl.createProgramInfo(gl, [vsPollen, fsPollen]);
+
 
 
   // -------------------------
@@ -179,6 +181,46 @@ function main() {
 
   rebuildSphere();
 
+
+// quantidade de partículas
+const POLLEN_COUNT = 1200;
+
+// atributos: up (vec3), phase (float), speed (float), size (float)
+const pollenUp = new Float32Array(POLLEN_COUNT * 3);
+const pollenPhase = new Float32Array(POLLEN_COUNT);
+const pollenSpeed = new Float32Array(POLLEN_COUNT);
+const pollenSize = new Float32Array(POLLEN_COUNT);
+
+// amostra direções uniformes na esfera (fibonacci)
+function fibDir(i, n) {
+  const phi = Math.PI * (3 - Math.sqrt(5));
+  const y = 1 - (i / (n - 1)) * 2;
+  const r = Math.sqrt(Math.max(0, 1 - y * y));
+  const t = phi * i;
+  return [Math.cos(t) * r, y, Math.sin(t) * r];
+}
+
+for (let i = 0; i < POLLEN_COUNT; i++) {
+  const up = fibDir(i + 1, POLLEN_COUNT + 2);
+
+  pollenUp[i * 3 + 0] = up[0];
+  pollenUp[i * 3 + 1] = up[1];
+  pollenUp[i * 3 + 2] = up[2];
+
+  pollenPhase[i] = Math.random();                  // 0..1
+  pollenSpeed[i] = 0.08 + Math.random() * 0.18;    // velocidade do ciclo
+  pollenSize[i] = 1.5 + Math.random() * 2.2;       // px
+}
+
+const pollenBufferInfo = twgl.createBufferInfoFromArrays(gl, {
+  up:    { numComponents: 3, data: pollenUp },
+  phase: { numComponents: 1, data: pollenPhase },
+  speed: { numComponents: 1, data: pollenSpeed },
+  size:  { numComponents: 1, data: pollenSize },
+});
+
+// VAO
+const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferInfo);
   // -------------------------
   // Renderer de OBJ (árvores/peixes) - mantém o seu
   // -------------------------
@@ -475,6 +517,33 @@ canvas.addEventListener("click", (e) => {
   });
 
   twgl.drawBufferInfo(gl, sphereBufferInfo, gl.TRIANGLES);
+
+  gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+// opcional: dá pra deixar um brilho mais "mágico"
+// gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+gl.enable(gl.DEPTH_TEST);
+// não escreve no depth pra não “sumir” atrás de si mesmo
+gl.depthMask(false);
+
+gl.useProgram(programPollen.program);
+gl.bindVertexArray(pollenVao);
+
+twgl.setUniforms(programPollen, {
+  u_viewProjection: viewProjection,
+  u_world: worldMatrix,
+  u_time: t,
+  u_baseRadius: data.radius,
+  u_waterOffset: data.waterOffset,
+});
+
+gl.drawArrays(gl.POINTS, 0, POLLEN_COUNT);
+
+// restaura
+gl.depthMask(true);
+gl.disable(gl.BLEND);
 
   // --- restaura estados (boa prática) ---
   gl.depthMask(true);

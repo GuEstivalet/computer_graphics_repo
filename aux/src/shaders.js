@@ -1,6 +1,4 @@
-// ==========================
-// PLANETA
-// ==========================
+// planeta
 
 export const vsPlanet = `#version 300 es
 precision highp float;
@@ -132,9 +130,7 @@ void main() {
 `;
 
 
-// ==========================
-// ÁGUA
-// ==========================
+// água oceano
 
 export const vsWater = `#version 300 es
 precision highp float;
@@ -226,7 +222,7 @@ void main() {
   vec4 worldPos = W * a_position;
   gl_Position = u_viewProjection * worldPos;
 
-  // normal: só rotação/escala (sem translacao)
+  // normal: só rotação
   v_normal = mat3(W) * a_normal;
   v_uv = a_texcoord;
 }
@@ -287,9 +283,9 @@ void main() {
 `;
 
 
-// -------------------------
-// Background (stars + clear halo near planet)
-// -------------------------
+// background estrelas + universo:
+
+
 export const vsBg = `#version 300 es
 precision highp float;
 
@@ -318,10 +314,10 @@ out vec4 outColor;
 uniform vec2  u_resolution;
 uniform float u_time;
 
-// centro do planeta em tela (normalmente 0.5,0.5)
+// centro do planeta em tela 
 uniform vec2  u_center;
 
-// raio "claro" ao redor do planeta (em fração da tela)
+// raio ao redor do planeta
 uniform float u_clearRadius;
 
 // intensidade do clarão no centro
@@ -369,7 +365,7 @@ float starLayer(vec2 uv, float scale, float density, float twinkle) {
 void main() {
   vec2 uv = v_uv;
 
-  // fundo bem escuro (espaço)
+  // fundo escuro
   vec3 col = vec3(0.01, 0.012, 0.02);
 
   // múltiplas camadas: dá profundidade
@@ -386,26 +382,112 @@ void main() {
   col += starCol2 * s2 * 1.0;
   col += starCol3 * s3 * 0.9;
 
-  // "nebulosa" bem leve (ruído grande)
+  // simula uma nebulosidade
   float neb = hash12(floor(uv * 18.0));
   col += vec3(0.02, 0.01, 0.03) * smoothstep(0.75, 1.0, neb) * 0.35;
 
-  // ✅ clarão ao redor do planeta (centro mais claro)
   // distância em pixels corrigida pelo aspect
   vec2 aspect = vec2(u_resolution.x / u_resolution.y, 1.0);
   vec2 d = (uv - u_center) * aspect;
   float r = length(d);
 
-  // halo: 1 no centro, 0 fora
   float halo = smoothstep(u_clearRadius, 0.0, r);
 
-  // não "lava" as estrelas demais; só levanta o preto
   col = mix(col, col + vec3(0.12, 0.12, 0.14) * u_clearStrength, halo);
 
-  // leve vignette pra bordas ficarem mais profundas
+  // para bordas ficarem mais profundas
   float vig = smoothstep(1.15, 0.2, length((uv - 0.5) * aspect));
   col *= mix(0.78, 1.0, vig);
 
   outColor = vec4(col, 1.0);
+}
+`;
+
+// animação pólem
+
+export const vsPollen = `#version 300 es
+precision highp float;
+
+in vec3 a_up;        // direção unitária (local do planeta)
+in float a_phase;    // fase 0..1
+in float a_speed;    // velocidade do ciclo (mesma de antes)
+in float a_size;     // tamanho base
+
+uniform mat4 u_viewProjection;
+uniform mat4 u_world;
+
+uniform float u_time;
+uniform float u_baseRadius;
+uniform float u_waterOffset;
+
+out float v_alpha;
+
+vec3 basisRight(vec3 up){
+  vec3 a = abs(up.y) < 0.999 ? vec3(0.0,1.0,0.0) : vec3(1.0,0.0,0.0);
+  return normalize(cross(a, up));
+}
+
+void main() {
+  vec3 up = normalize(a_up);
+
+  float surfaceR = u_baseRadius + u_waterOffset;
+  float spawnR   = surfaceR + 10.0;   // "céu"
+  float endR     = surfaceR + 0.12;   // quase na superfície
+
+  //  t cresce com u_time*a_speed
+  float t = fract(u_time * a_speed + a_phase);
+
+  // queda radial
+  float r = mix(spawnR, endR, t);
+
+  // base tangente
+  vec3 right = basisRight(up);
+  vec3 fwd   = normalize(cross(up, right));
+
+  // espiral
+  float turns = 3.0; // ajuste: 1.0 suave, 5.0 bem espiralado
+  float angle = (u_time * 3.0 + a_phase * 6.283) + t * (turns * 6.283);
+
+  // raio da espiral (quanto "abre" lateralmente)
+  // cresce um pouco no meio e some perto do final
+  float spiralRadius = 0.35; // ajuste: 0.15..0.6
+  float life = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.80, 1.0, t));
+  float spiral = spiralRadius * life;
+
+  vec3 spiralOffset = (cos(angle) * right + sin(angle) * fwd) * spiral;
+
+  vec3 posLocal = up * r + spiralOffset;
+
+  vec4 worldPos = u_world * vec4(posLocal, 1.0);
+  gl_Position = u_viewProjection * worldPos;
+
+  // tamanho em pixels
+  float tw = sin(u_time * 6.0 + a_phase * 20.0) * 0.5 + 0.5;
+  gl_PointSize = a_size * (0.75 + 0.6 * tw);
+
+  // alpha: forte no meio, some no final
+  v_alpha = life;
+}
+`;
+
+export const fsPollen = `#version 300 es
+precision highp float;
+
+in float v_alpha;
+out vec4 outColor;
+
+void main() {
+  // sprite circular suave
+  vec2 p = gl_PointCoord - vec2(0.5);
+  float d = length(p);
+  float core = smoothstep(0.5, 0.0, d);
+
+  // cor de pólen (amarelo bem suave)
+  vec3 col = vec3(1.0, 0.92, 0.55);
+
+  float a = core * v_alpha * 0.55; // alpha geral
+  if (a < 0.01) discard;
+
+  outColor = vec4(col, a);
 }
 `;
