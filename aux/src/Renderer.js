@@ -922,40 +922,42 @@ _rebuildFishInstances() {
 
   // ---------- FISHES ----------
   if (this.fishInst.vao && this.fishInst.count > 0) {
-    gl.bindVertexArray(this.fishInst.vao);
+  gl.bindVertexArray(this.fishInst.vao);
 
-    const fish = this.models.fish;
-    const axis = fish.longAxis ?? 0;
-    const ext = fish.extents;
+  const fish = this.models.fish;
+  const axis = fish.longAxis ?? 0;
+  const ext = fish.extents;
 
-    this.twgl.setUniforms(this.programObj, {
-      u_viewProjection: viewProjection,
-      u_world: worldMatrix,
-      u_lightDir: this.lightDir, 
-      
+  this.twgl.setUniforms(this.programObj, {
+    u_viewProjection: viewProjection,
+    u_world: worldMatrix,
+    u_lightDir: this.lightDir,
 
-      // animação
-      u_time: performance.now() * 0.001,
-      u_isFish: 1.0,
-      u_swimAmp: 0.12,     // ajuste fino
-      u_swimFreq: 10.0,    // quantas ondas ao longo do corpo
-      u_swimSpeed: 6.0,    // velocidade
+    // >>> TEXTURA DO PEIXE (ou desliga)
+    u_useTexture: !!this.textures.fish,
+    u_texture: this.textures.fish,
 
-      // eixo e min/max do “comprimento”
-      u_swimAxis: axis,
-      u_swimMin: ext.min[axis],
-      u_swimMax: ext.max[axis],
-    });
+    // animação
+    u_time: timeSec,                 // pode usar timeSec também
+    u_isFish: 1.0,
+    u_swimAmp: 0.12,
+    u_swimFreq: 10.0,
+    u_swimSpeed: 6.0,
 
-    this.twgl.drawBufferInfo(
-      gl,
-      this.fishInst.bufferInfo,
-      drawMode,
-      this.fishInst.bufferInfo.numElements,
-      0,
-      this.fishInst.count
-    );
-  }
+    u_swimAxis: axis,
+    u_swimMin: ext.min[axis],
+    u_swimMax: ext.max[axis],
+  });
+
+  this.twgl.drawBufferInfo(
+    gl,
+    this.fishInst.bufferInfo,
+    drawMode,
+    this.fishInst.bufferInfo.numElements,
+    0,
+    this.fishInst.count
+  );
+}
 
   gl.bindVertexArray(null);
 }
