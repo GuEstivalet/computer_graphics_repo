@@ -101,6 +101,7 @@ uniform float u_snow;
 uniform sampler2D u_texGrass;
 uniform sampler2D u_texRock;
 uniform float u_texScale;
+uniform vec3 u_lightDir;
 
 out vec4 outColor;
 
@@ -129,8 +130,9 @@ void main() {
   vec3 n = normalize(v_worldNormal);
 
   // luz simples
-  vec3 lightDir = normalize(vec3(1.0,1.0,1.0));
-  float light = dot(n,lightDir)*0.5 + 0.5;
+  vec3 lightDir = normalize(u_lightDir);
+  float ndl = max(dot(n, lightDir), 0.0);
+  float light = 0.08 + ndl * 0.92;   // 8% ambiente + 92% difuso
 
   // aqui h deve ser ALTURA relativa (radius - baseRadius)
   float h = v_height;
@@ -287,15 +289,24 @@ in vec2 v_uv;
 uniform bool u_useTexture;
 uniform sampler2D u_texture;
 
+uniform vec3 u_lightDir; 
+
 out vec4 outColor;
 
 void main() {
   vec3 n = normalize(v_normal);
-  vec3 lightDir = normalize(vec3(0.3, 0.8, 0.4));
-  float diff = max(dot(n, lightDir), 0.0);
-  float shade = diff * 0.8 + 0.2;
+
+  // usa a direção da luz vinda do JS
+  vec3 lightDir = normalize(u_lightDir);
+
+  // difuso físico
+  float ndl = max(dot(n, lightDir), 0.0);
+
+  // quase escuro no lado oposto
+  float shade = 0.08 + ndl * 0.92;
 
   vec3 baseColor = vec3(0.2, 0.8, 0.3);
+
   if (u_useTexture) {
     baseColor = texture(u_texture, v_uv).rgb;
   }
@@ -303,6 +314,7 @@ void main() {
   outColor = vec4(baseColor * shade, 1.0);
 }
 `;
+
 
 export const vsPick = `#version 300 es
 precision highp float;

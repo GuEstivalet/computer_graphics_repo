@@ -112,7 +112,7 @@ function main() {
 
     // ruído água
     waterNoiseAmp: 0.35,
-    waterNoiseFreq: 10.0,
+    waterNoiseFreq: 20.0,
 
     // debug
     triangles: true,
@@ -135,7 +135,6 @@ function main() {
   if (webglLessonsUI) {
     webglLessonsUI.setupUI(document.querySelector("#ui"), data, [
       { type: "slider", key: "cameraZoom", min: 1.5, max: 8, step: 0.1, precision: 1 },
-      { type: "slider", key: "radius", min: 20, max: 200, step: 1, change: rebuildSphere },
       { type: "slider", key: "planetNoiseAmp", min: 0, max: 40, step: 0.5, precision: 1 },
       { type: "slider", key: "planetNoiseFreq", min: 0.1, max: 12, step: 0.1, precision: 1 },
       { type: "slider", key: "seed", min: 0, max: 50, step: 0.1, precision: 1 },
@@ -147,13 +146,13 @@ function main() {
       { type: "slider", key: "snow", min: 0, max: 50, step: 0.5, precision: 1 },
 
       { type: "slider", key: "waterOffset", min: 0.0, max: 10.0, step: 0.1, precision: 1 },
-      { type: "slider", key: "waterAlpha", min: 0.05, max: 0.85, step: 0.01, precision: 2 },
       { type: "slider", key: "waveAmp", min: 0.0, max: 4.0, step: 0.05, precision: 2 },
       { type: "slider", key: "waveSpeed", min: 0.0, max: 5.0, step: 0.05, precision: 2 },
       { type: "slider", key: "waterNoiseAmp", min: 0.0, max: 2.0, step: 0.02, precision: 2 },
       { type: "slider", key: "waterNoiseFreq", min: 0.1, max: 30.0, step: 0.1, precision: 1 },
       
-
+      { type: "slider", key: "lightX", min: -1.0, max: 1.0, step: 0.01, precision: 2 },
+{ type: "slider", key: "lightY", min: -1.0, max: 1.0, step: 0.01, precision: 2 },
       { type: "checkbox", key: "triangles" },
     ]);
   }
@@ -482,6 +481,17 @@ canvas.addEventListener("click", (e) => {
     gl.useProgram(programBg.program);
     gl.bindVertexArray(null); // full-screen triangle sem VAO
 
+    // Light setup
+    const lx = data.lightX;
+    const ly = data.lightY;
+    const lz = 0.35; 
+    let lightDir = [lx, ly, lz];
+    {
+      const L = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
+      lightDir = [lightDir[0]/L, lightDir[1]/L, lightDir[2]/L];
+    }
+    renderer.lightDir = lightDir;
+
     twgl.setUniforms(programBg, {
       u_resolution: [gl.canvas.width, gl.canvas.height],
       u_time: t,
@@ -602,6 +612,11 @@ viewProjection = m4.multiply(projection, viewMatrix);
     u_texGrass: texGrass,
     u_texRock: texRock,
     u_texScale: 0.3, 
+
+    u_lightDir: lightDir,
+    u_cameraPos: cameraPosition,
+    u_ambient: 0.03,   // baixo para “lado escuro quase preto”
+    u_diffuse: 1.1,
   });
 
   twgl.drawBufferInfo(gl, sphereBufferInfo, data.triangles ? gl.TRIANGLES : gl.LINES);
@@ -610,7 +625,9 @@ viewProjection = m4.multiply(projection, viewMatrix);
   gl.disable(gl.BLEND);
   gl.depthMask(true);
   renderer.update(dt, t);
-  renderer.drawObjects(viewProjection, worldMatrix,t);
+  renderer.drawObjects(viewProjection, worldMatrix, {
+    u_lightDir: lightDir,
+  });
 
   // 3) ÁGUA (TRANSPARENTE) — POR ÚLTIMO
   gl.enable(gl.BLEND);
@@ -651,10 +668,9 @@ viewProjection = m4.multiply(projection, viewMatrix);
   twgl.drawBufferInfo(gl, sphereBufferInfo, gl.TRIANGLES);
 
   gl.enable(gl.BLEND);
-gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
 // opcional: dá pra deixar um brilho mais "mágico"
-// gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+ gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
 gl.enable(gl.DEPTH_TEST);
 // não escreve no depth pra não “sumir” atrás de si mesmo

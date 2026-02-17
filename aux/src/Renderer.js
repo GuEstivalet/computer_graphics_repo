@@ -856,6 +856,7 @@ _rebuildFishInstances() {
       u_world: worldMatrix,
       u_useTexture: !!this.textures.tree,
       u_texture: this.textures.tree,
+      u_lightDir: this.lightDir, 
 
         u_time: timeSec,
         u_isFish: 0.0,        // árvore não deforma
@@ -891,6 +892,8 @@ _rebuildFishInstances() {
     this.twgl.setUniforms(this.programObj, {
       u_viewProjection: viewProjection,
       u_world: worldMatrix,
+      u_lightDir: this.lightDir, 
+      
 
       // animação
       u_time: performance.now() * 0.001,
