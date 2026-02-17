@@ -11,6 +11,8 @@ const twgl = window.twgl;
 const m4 = window.m4;
 const webglLessonsUI = window.webglLessonsUI;
 
+
+// func para picktree
 function getPickRay(canvas, projection, viewMatrix, clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   const x = clientX - rect.left;
@@ -27,7 +29,8 @@ function getPickRay(canvas, projection, viewMatrix, clientX, clientY) {
 
   const dir = v3normalize([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]);
   return { origin: p0, dir };
-}
+} 
+
 
 function raySphere(origin, dir, radius) {
   const ox = origin[0],
@@ -60,7 +63,7 @@ function main() {
     return;
   }
 
-  // ✅ Importante: com attribPrefix="a_", os arrays devem se chamar position/normal/texcoord
+  //  Importante: com attribPrefix="a_", os arrays devem se chamar position/normal/texcoord
   twgl.setDefaults({ attribPrefix: "a_" });
 
   const canvas = document.querySelector("canvas");
@@ -123,6 +126,10 @@ function main() {
 
     lightX: 0.3,
     lightY: 0.8,
+    oceanDepth: 2.5,     // quanto “afunda” o oceano
+    landLift: 0.0,       // se quiser a terra um pouco acima do base
+    mountainLift: 6.0,   // altura dos picos
+    biomeBlend: 0.8
   };
 
   if (webglLessonsUI) {
@@ -150,6 +157,22 @@ function main() {
       { type: "checkbox", key: "triangles" },
     ]);
   }
+
+  //criando texturas
+    const texGrass = twgl.createTexture(gl, {
+      src: "texture/grass_detail.jpg",
+      min: gl.LINEAR_MIPMAP_LINEAR,
+      mag: gl.LINEAR,
+      wrap: gl.REPEAT,
+    });
+
+    const texRock = twgl.createTexture(gl, {
+      src: "texture/rock_detail.jpg",
+      min: gl.LINEAR_MIPMAP_LINEAR,
+      mag: gl.LINEAR,
+      wrap: gl.REPEAT,
+    });
+
 
   // -------------------------
   // Programs planeta/água
@@ -240,6 +263,10 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     fishSpeed: data.fishSpeed,
     treeCount: data.treeCount,
     fishCount: data.fishCount,
+    oceanDepth: data.oceanDepth,
+    landLift: data.landLift,
+    mountainLift: data.mountainLift,
+    biomeBlend: data.biomeBlend,
   });
 
   renderer.loadModels().catch(console.error);
@@ -251,7 +278,6 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
   let autoRotationY = 0;
   let mouseRotationMatrix = m4.identity();
   let pauseRotation = false;
-  let firstclick =false;
 
   let lastPos = null;
   let moving = false;
@@ -265,6 +291,16 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
       (y - canvas.height / 2) / window.devicePixelRatio,
     ];
   }
+    
+
+
+
+// LISTENERS
+
+  // para modo jogo
+  let followFish = false;
+  let followFishIndex = 0;
+
 
   canvas.addEventListener("wheel", (e) => {
   e.preventDefault();
@@ -276,26 +312,30 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
 
   // limites seguros
   data.cameraZoom = Math.max(1.2, Math.min(12.0, data.cameraZoom));
-}, { passive: false });
+  }, 
+  { passive: false });
 
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
   canvas.addEventListener("mousedown", (e) => {
   // Verifica se é o botão direito (button 2)
-  if (e.button === 2) {
-    e.preventDefault(); // Evita comportamentos estranhos
-    pauseRotation = !pauseRotation; // Se estava true vira false, se false vira true
-    
-    // Opcional: Log para você testar no console
-    console.log("Rotação pausada:", pauseRotation);
-  }
-});
+    if (e.button === 2) {
+      e.preventDefault(); // Evita comportamentos estranhos
+      pauseRotation = !pauseRotation; // Se estava true vira false, se false vira true
+      
+      // Opcional: Log para você testar no console
+      console.log("Rotação pausada:", pauseRotation);
+    }
+  });
 
   canvas.addEventListener("mousedown", (e) => {
     e.preventDefault();
     lastPos = getRelativeMousePosition(e);
     moving = true;
   });
+
   window.addEventListener("mouseup", () => (moving = false));
+
   window.addEventListener("mousemove", (e) => {
     if (!moving) return;
     const pos = getRelativeMousePosition(e);
@@ -307,6 +347,34 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     inc = m4.multiply(inc, m4.yRotation(dx * 5));
     mouseRotationMatrix = m4.multiply(inc, mouseRotationMatrix);
     lastPos = pos;
+  });
+  // modo jogo
+  window.addEventListener("keydown", (e) => {
+    if (e.repeat) return;
+
+    if (e.code === "Digit7") {
+      followFish = !followFish;
+
+      if (followFish) {
+        followFishIndex = 0;
+
+        renderer.setFollowFishEnabled(true);
+        renderer.setControlledFishIndex(followFishIndex);
+
+        // limpa alvo antigo
+        renderer.setMouseTargetUpLocal(null);
+
+        // pausa rotação do planeta
+        pauseRotation = true;
+      } else {
+        renderer.setFollowFishEnabled(false);
+
+        // limpa alvo do mouse
+        renderer.setMouseTargetUpLocal(null);
+        renderer.setMouseUpLocal(null);
+        pauseRotation = false;
+      }
+    }
   });
 
   // -------------------------
@@ -324,7 +392,8 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     const ray = getPickRay(canvas, projection, viewMatrix, e.clientX, e.clientY);
     const hit = raySphere(ray.origin, ray.dir, data.radius);
     if (!hit) {
-      renderer.setMouseUpLocal(null);
+      if (followFish) renderer.setMouseTargetUpLocal(null);
+      else renderer.setMouseUpLocal(null);
       return;
     }
 
@@ -332,7 +401,8 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     const localHit = m4.transformPoint(invWorld, hit);
     const upLocal = v3normalize(localHit);
 
-    renderer.setMouseUpLocal(upLocal);
+    if (followFish) renderer.setMouseTargetUpLocal(upLocal);
+      else renderer.setMouseUpLocal(upLocal);
   });
 
 canvas.addEventListener("click", (e) => {
@@ -440,17 +510,76 @@ canvas.addEventListener("click", (e) => {
 
   // near menor ajuda no zoom (se precisar)
   projection = m4.perspective(fov, aspect, 0.2, 5000);
-
-  const distance = data.radius * data.cameraZoom;
-  const cameraPosition = [0, 0, distance];
-  const target = [0, 0, 0];
-  const up = [0, 1, 0];
-  const cameraMatrix = m4.lookAt(cameraPosition, target, up);
-  viewMatrix = m4.inverse(cameraMatrix);
-  viewProjection = m4.multiply(projection, viewMatrix);
-
+  
   const autoMatrix = m4.yRotation(autoRotationY);
   worldMatrix = m4.multiply(mouseRotationMatrix, autoMatrix);
+
+  // mudança para modo jogo
+  let cameraPosition, target, up;
+
+  if (!followFish) {
+    const distance = data.radius * data.cameraZoom;
+    cameraPosition = [0, 0, distance];
+    target = [0, 0, 0];
+    up = [0, 1, 0];
+  } else {
+    const pose = renderer.getControlledFishLocalPose();
+
+    if (!pose) {
+      const distance = data.radius * data.cameraZoom;
+      cameraPosition = [0, 0, distance];
+      target = [0, 0, 0];
+      up = [0, 1, 0];
+    } else {
+      // worldMatrix precisa existir antes 
+      const fishWorldPos = m4.transformPoint(worldMatrix, pose.posLocal);
+
+      // vel world
+      const velEnd = m4.transformPoint(worldMatrix, [
+        pose.posLocal[0] + pose.velLocal[0],
+        pose.posLocal[1] + pose.velLocal[1],
+        pose.posLocal[2] + pose.velLocal[2],
+      ]);
+      let fishWorldVel = [
+        velEnd[0] - fishWorldPos[0],
+        velEnd[1] - fishWorldPos[1],
+        velEnd[2] - fishWorldPos[2],
+      ];
+      const vL = Math.hypot(fishWorldVel[0], fishWorldVel[1], fishWorldVel[2]) || 1;
+      fishWorldVel = [fishWorldVel[0]/vL, fishWorldVel[1]/vL, fishWorldVel[2]/vL];
+
+      // up world
+      const upEnd = m4.transformPoint(worldMatrix, [
+        pose.posLocal[0] + pose.up[0],
+        pose.posLocal[1] + pose.up[1],
+        pose.posLocal[2] + pose.up[2],
+      ]);
+      let fishWorldUp = [
+        upEnd[0] - fishWorldPos[0],
+        upEnd[1] - fishWorldPos[1],
+        upEnd[2] - fishWorldPos[2],
+      ];
+      const uL = Math.hypot(fishWorldUp[0], fishWorldUp[1], fishWorldUp[2]) || 1;
+      fishWorldUp = [fishWorldUp[0]/uL, fishWorldUp[1]/uL, fishWorldUp[2]/uL];
+
+      const behind = 10.0;
+      const above  = data.radius * 0.15;
+
+      cameraPosition = [
+        fishWorldPos[0] - fishWorldVel[0]*behind + fishWorldUp[0]*above,
+        fishWorldPos[1] - fishWorldVel[1]*behind + fishWorldUp[1]*above,
+        fishWorldPos[2] - fishWorldVel[2]*behind + fishWorldUp[2]*above,
+      ];
+      target = fishWorldPos;
+      up = fishWorldUp;
+    }
+  }
+
+const cameraMatrix = m4.lookAt(cameraPosition, target, up);
+viewMatrix = m4.inverse(cameraMatrix);
+viewProjection = m4.multiply(projection, viewMatrix);
+  viewMatrix = m4.inverse(cameraMatrix);
+  viewProjection = m4.multiply(projection, viewMatrix);
 
   // 1) PLANETA (OPACO)
   gl.useProgram(programPlanet.program);
@@ -470,6 +599,9 @@ canvas.addEventListener("click", (e) => {
     u_beach: data.beach,
     u_mountain: data.mountain,
     u_snow: data.snow,
+    u_texGrass: texGrass,
+    u_texRock: texRock,
+    u_texScale: 0.3, 
   });
 
   twgl.drawBufferInfo(gl, sphereBufferInfo, data.triangles ? gl.TRIANGLES : gl.LINES);
@@ -478,13 +610,13 @@ canvas.addEventListener("click", (e) => {
   gl.disable(gl.BLEND);
   gl.depthMask(true);
   renderer.update(dt, t);
-  renderer.drawObjects(viewProjection, worldMatrix);
+  renderer.drawObjects(viewProjection, worldMatrix,t);
 
   // 3) ÁGUA (TRANSPARENTE) — POR ÚLTIMO
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-  // ✅ água NÃO escreve depth, senão “some” peixe/árvore atrás dela
+  //  água NÃO escreve depth, senão “some” peixe/árvore atrás dela
   gl.depthMask(false);
   gl.depthFunc(gl.LEQUAL);
 

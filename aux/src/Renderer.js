@@ -102,6 +102,24 @@ export class Renderer {
     // Importante: atributos no shader devem ser a_position, a_normal, a_iWorld0, etc
     this.twgl.setDefaults({ attribPrefix: "a_" });
 
+    // modo jogo
+    this.control = {
+      enabled: false,
+      fishIndex: 0,
+    };
+
+    this.mouseTargetUpLocal = null;
+    this.setMouseTargetUpLocal = (upLocal) => {
+      this.mouseTargetUpLocal = upLocal;
+    };
+
+    //texture
+    this.textures = {
+      tree: null,
+      fish: null,
+    };
+
+    // data
     this.data = {
       radius: 100,
       planetNoiseAmp: 12,
@@ -128,10 +146,19 @@ export class Renderer {
       fishPanicDot: 0.985,   // distância do mouse (~10 graus)
     };
 
+
+    // infos do Picktree
+    this.programPick = this.twgl.createProgramInfo(this.gl, [vsPick, fsPick]);
+    // picking resources
+    this.pick = { fb: null, tex: null, depth: null, w: 0, h: 0 };
+    // VAO de picking (mesmo bufferInfo instanciado, outro programa)
+    this.treePickVao = null;
+
+
     this.displacedRadius = deps.displacedRadius;
 
     this.programObj = this.twgl.createProgramInfo(this.gl, [vsObj, fsObj]);
-
+    
     // modelos (guardamos arrays e bufferInfo)
     this.models = {
       tree: { arrays: null, bufferInfo: null, wireArrays: null, wireBufferInfo: null, scaleFix: 1 },
@@ -154,6 +181,106 @@ export class Renderer {
     };
   }
 
+  // para modo jogo
+
+  setFollowFishEnabled(on) {
+  this.control.enabled = !!on;
+
+  if (!this.control.enabled) {
+    for (const f of this.fishes) f._controlBoost = 0;
+  }
+  }
+
+  setControlledFishIndex(idx) {
+    const n = this.fishes.length;
+    if (!n) { this.control.fishIndex = 0; return; }
+    this.control.fishIndex = Math.max(0, Math.min(n - 1, idx | 0));
+  }
+
+  getControlledFishLocalPose() {
+  const n = this.fishes.length;
+  if (!n) return null;
+
+  const idx = Math.max(0, Math.min(n - 1, this.control.fishIndex | 0));
+  const f = this.fishes[idx];
+
+  const up = v3norm(f._upNow || f.up);
+
+  const waterR = this.data.radius + this.data.waterOffset;
+  const posLocal = v3scale(up, waterR * 1.002);
+
+  let velLocal = f._vel;
+  if (!velLocal) {
+    const { fwd } = basisFromUp(up);
+    velLocal = fwd;
+    } else {
+      velLocal = v3norm(projectToTangent(velLocal, up));
+    }
+
+    return { idx, up, posLocal, velLocal };
+  }
+
+  pickTreeAtPixel(x, y, viewProjection, worldMatrix) {
+  const gl = this.gl;
+
+  if (!this.treeInst.bufferInfo || !this.treePickVao || this.treeInst.count <= 0) return -1;
+
+  // garante buffer do tamanho do canvas
+  const w = gl.canvas.width;
+  const h = gl.canvas.height;
+  this._resizePickBuffer(w, h);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, this.pick.fb);
+  gl.viewport(0, 0, w, h);
+
+  // fundo = 0 (nenhuma árvore)
+  gl.disable(gl.BLEND);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthMask(true);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  // desenha árvores com cor = ID
+  gl.useProgram(this.programPick.program);
+  gl.bindVertexArray(this.treePickVao);
+
+  // uniforms base
+  this.twgl.setUniforms(this.programPick, {
+    u_viewProjection: viewProjection,
+    u_world: worldMatrix,
+  });
+
+  // desenha instanciado (IMPORTANTE: instanceCount = this.treeInst.count)
+  this.twgl.drawBufferInfo(
+    gl,
+    this.treeInst.bufferInfo,
+    gl.TRIANGLES,
+    this.treeInst.bufferInfo.numElements,
+    0,
+    this.treeInst.count
+  );
+
+  // lê o pixel clicado
+  const px = new Uint8Array(4);
+
+  // y do mouse vem top-left, readPixels usa bottom-left
+  const ry = h - 1 - y;
+  gl.readPixels(x, ry, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+
+  gl.bindVertexArray(null);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // decodifica ID (24-bit): r + g*256 + b*65536
+  const id = px[0] + px[1] * 256 + px[2] * 65536;
+
+  // id 0 = nada; árvore i = id-1
+  const idx = id - 1;
+  if (idx < 0 || idx >= this.trees.length) return -1;
+
+  return idx;
+}
+
+  // para remover arvore
   _resizePickBuffer(w, h) {
   const gl = this.gl;
 
@@ -248,10 +375,22 @@ export class Renderer {
     }
 
     const ext = computeExtentsFromPositions(pos);
+        // guarda extents pra usar no shader (especialmente do fish)
+    this.models[name].extents = ext;
+
+    // escolhe o eixo mais longo (0=x,1=y,2=z)
+    const dx = ext.max[0] - ext.min[0];
+    const dy = ext.max[1] - ext.min[1];
+    const dz = ext.max[2] - ext.min[2];
+    let axis = 0;
+    if (dy > dx && dy > dz) axis = 1;
+    else if (dz > dx && dz > dy) axis = 2;
+
+    this.models[name].longAxis = axis;
     const maxDim =
       Math.max(ext.max[0] - ext.min[0], ext.max[1] - ext.min[1], ext.max[2] - ext.min[2]) || 1;
 
-    // ✅ guarda arrays originais (inclui indices, se tiver)
+    // guarda arrays originais (inclui indices, se tiver)
     this.models[name].arrays = arrays;
     this.models[name].scaleFix = 1 / maxDim;
     this.models[name].bufferInfo = this.twgl.createBufferInfoFromArrays(gl, arrays);
@@ -278,7 +417,51 @@ export class Renderer {
       this.models[name].wireArrays = null;
       this.models[name].wireBufferInfo = null;
     }
+    await this._loadMTLTexture(name, url);
   }
+
+
+  // Carregador de textura .mtl
+
+  async _loadMTLTexture(modelName, objUrl) {
+  const gl = this.gl;
+
+  // assume que .mtl tem mesmo nome do obj
+  const mtlUrl = objUrl.replace(".obj", ".mtl");
+
+  try {
+    const txt = await loadText(mtlUrl);
+
+    const lines = txt.split(/\r?\n/);
+    let textureFile = null;
+
+    for (const line of lines) {
+      const l = line.trim();
+      if (l.startsWith("map_Kd")) {
+        const parts = l.split(/\s+/);
+        textureFile = parts[1];
+        break;
+      }
+    }
+
+    if (!textureFile) return;
+
+    const basePath = objUrl.substring(0, objUrl.lastIndexOf("/") + 1);
+    const texUrl = basePath + textureFile;
+
+    this.textures[modelName] = this.twgl.createTexture(gl, {
+      src: texUrl,
+      flipY: true,
+      min: gl.LINEAR_MIPMAP_LINEAR,
+      mag: gl.LINEAR,
+      wrap: gl.REPEAT,
+      crossOrigin: "",
+    });
+
+  } catch (e) {
+    console.warn("MTL não encontrado para", modelName);
+  }
+}
 
 _seedTrees() {
   this.trees.length = 0;
@@ -292,7 +475,7 @@ _seedTrees() {
   while (placed < want && attempts < maxAttempts) {
     attempts++;
 
-    // ✅ up aleatório uniforme na esfera
+    // up aleatório uniforme na esfera
     const u = Math.random();
     const v = Math.random();
     const theta = 2 * Math.PI * u;
@@ -324,7 +507,7 @@ _seedFishes() {
   while (placed < want && attempts < maxAttempts) {
     attempts++;
 
-    // ✅ amostra aleatória uniforme na esfera (mais "orgânico" que fibonacci pra spawn)
+    // amostra aleatória uniforme na esfera (mais "orgânico" que fibonacci pra spawn)
     const u = Math.random();
     const v = Math.random();
     const theta = 2 * Math.PI * u;
@@ -334,7 +517,7 @@ _seedFishes() {
 
     if (!isWater(this.displacedRadius, up, this.data)) continue;
 
-    // ✅ evita ficar aglomerado: checa separação angular mínima
+    //  evita ficar aglomerado: checa separação angular mínima
     let ok = true;
     for (let k = 0; k < this.fishes.length; k++) {
       const d = v3dot(this.fishes[k]._upNow || this.fishes[k].up, up); // cos(ângulo)
@@ -416,6 +599,32 @@ update(dt, timeSec) {
     let up = v3norm(f._upNow || f.up);
 
     let vel = f._vel;
+
+      // MODO JOGO: peixe controlado segue o alvo do mouse (pela tangente)
+      if (this.control.enabled) {
+        const idx = this.control.fishIndex | 0;
+        const isControlled = (this.fishes[idx] === f);
+
+        if (isControlled && this.mouseTargetUpLocal) {
+
+          const targetUp = v3norm(this.mouseTargetUpLocal);
+
+          let desired = projectToTangent(v3sub(targetUp, up), up);
+
+          if (v3len(desired) > 1e-6) {
+            desired = v3norm(desired);
+
+            const turn = 1.0 - Math.pow(0.001, dt);
+            vel = v3norm(v3add(v3mul(vel, 1.0 - turn), v3mul(desired, turn)));
+            vel = v3norm(projectToTangent(vel, up));
+          }
+
+          const near = v3dot(up, targetUp) > 0.985;
+          if (near) {
+            f._boostUntil = timeSec + 0.3;
+          }
+        }
+      }
     if (!vel) {
       const r = v3norm([Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1]);
       vel = v3norm(projectToTangent(v3cross(r, up), up));
@@ -447,7 +656,7 @@ update(dt, timeSec) {
 
       const inWaterNext = isWater(this.displacedRadius, upNext, this.data);
 
-      // ✅ AGORA CERTO: usa altura (h), não vetor
+      // usa altura (h), não vetor
       const hNext = heightAt(upNext);
       const tooHigh = hNext > (this.data.ocean + this.data.fishClearance);
 
@@ -487,7 +696,7 @@ _rebuildTreeInstances() {
   const iWorld2 = new Float32Array(count * 4);
   const iWorld3 = new Float32Array(count * 4);
 
-  // ✅ escala final da árvore (100x menor que antes)
+  // escala final da árvore (100x menor que antes)
   const s = this.data.treeScale * this.models.tree.scaleFix * 0.01; // << deixa MUITO menor (ajuste fino aqui)
 
   for (let i = 0; i < count; i++) {
@@ -505,7 +714,7 @@ _rebuildTreeInstances() {
       this.data.octaves ?? 6
     );
 
-    // ✅ lift proporcional ao tamanho final do OBJ (não ao slider cru)
+    // lift proporcional ao tamanho final do OBJ (não ao slider cru)
     const lift = s * 0.5;
     const pos = v3scale(up, r * 1.002 + lift);
 
@@ -533,7 +742,9 @@ _rebuildTreeInstances() {
   const combinedArrays = { ...this.models.tree.arrays, ...instArrays };
   this.treeInst.bufferInfo = this.twgl.createBufferInfoFromArrays(gl, combinedArrays);
   this.treeInst.vao = this.twgl.createVAOFromBufferInfo(gl, this.programObj, this.treeInst.bufferInfo);
-}
+  // VAO para picking (mesmo bufferInfo, outro programa)
+  this.treePickVao = this.twgl.createVAOFromBufferInfo(gl, this.programPick, this.treeInst.bufferInfo);
+  }
 
 
 _rebuildFishInstances() {
@@ -554,7 +765,7 @@ _rebuildFishInstances() {
 
     const upAxis = v3norm(f._upNow || f.up);
 
-    // ✅ direção de movimento (tangente) define pra onde o peixe "olha"
+    // direção de movimento (tangente) define pra onde o peixe "olha"
     let fwdAxis = f._vel ? projectToTangent(f._vel, upAxis) : null;
     if (!fwdAxis || v3len(fwdAxis) < 1e-6) {
       // fallback se vel ainda não existe
@@ -595,9 +806,12 @@ _rebuildFishInstances() {
     world[8] = fwdAxis[0] * s;   world[9] = fwdAxis[1] * s;   world[10] = fwdAxis[2] * s;
     world[12] = pos[0];          world[13] = pos[1];          world[14] = pos[2]; world[15] = 1;
 
-    // ✅ rotação fixa do modelo (se seu fish.obj precisar)
+    // rotação fixa do modelo
     // Se o peixe estiver virado “de lado”, troque por zRotation/yRotation.
-    const fix = m4.xRotation(-Math.PI * -0.5);
+    const fix = m4.multiply(
+      m4.xRotation(-Math.PI * 0.5),
+      m4.zRotation(Math.PI)
+    );
     world = m4.multiply(world, fix);
 
     const o = i * 4;
@@ -619,8 +833,14 @@ _rebuildFishInstances() {
   this.fishInst.vao = this.twgl.createVAOFromBufferInfo(gl, this.programObj, this.fishInst.bufferInfo);
 }
 
+  removeTreeByIndex(idx) {
+    if (idx < 0 || idx >= this.trees.length) return false;
+    this.trees.splice(idx, 1);
+    this._rebuildTreeInstances();
+    return true;
+  }
 
-  drawObjects(viewProjection, worldMatrix) {
+  drawObjects(viewProjection, worldMatrix, timeSec) {
   const gl = this.gl;
 
   gl.useProgram(this.programObj.program);
@@ -634,9 +854,17 @@ _rebuildFishInstances() {
     this.twgl.setUniforms(this.programObj, {
       u_viewProjection: viewProjection,
       u_world: worldMatrix,
+      u_useTexture: !!this.textures.tree,
+      u_texture: this.textures.tree,
+
+        u_time: timeSec,
+        u_isFish: 0.0,        // árvore não deforma
+        u_swimAmp: 0.0,
+        u_swimFreq: 0.0,
+        u_swimSpeed: 0.0
     });
 
-    // ✅ se wireframe, desenha com bufferInfo "wire" combinado com instância
+    // se wireframe, desenha com bufferInfo "wire" combinado com instância
     const model = this.models.tree;
     const base = (this.data.debugWire && model.wireBufferInfo) ? model.wireBufferInfo : model.bufferInfo;
 
@@ -656,9 +884,25 @@ _rebuildFishInstances() {
   if (this.fishInst.vao && this.fishInst.count > 0) {
     gl.bindVertexArray(this.fishInst.vao);
 
+    const fish = this.models.fish;
+    const axis = fish.longAxis ?? 0;
+    const ext = fish.extents;
+
     this.twgl.setUniforms(this.programObj, {
       u_viewProjection: viewProjection,
       u_world: worldMatrix,
+
+      // animação
+      u_time: performance.now() * 0.001,
+      u_isFish: 1.0,
+      u_swimAmp: 0.12,     // ajuste fino
+      u_swimFreq: 10.0,    // quantas ondas ao longo do corpo
+      u_swimSpeed: 6.0,    // velocidade
+
+      // eixo e min/max do “comprimento”
+      u_swimAxis: axis,
+      u_swimMin: ext.min[axis],
+      u_swimMax: ext.max[axis],
     });
 
     this.twgl.drawBufferInfo(

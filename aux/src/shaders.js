@@ -18,6 +18,7 @@ uniform int   u_octaves;
 out vec3 v_worldPos;
 out vec3 v_worldNormal;
 out float v_height;
+out vec3 v_localPos;
 
 // ---------- Noise ----------
 
@@ -73,11 +74,12 @@ void main() {
 
   float radius = u_baseRadius + n * u_noiseAmp;
   vec3 posLocal = nLocal * radius;
+  v_localPos = posLocal;
 
   vec4 worldPos4 = u_world * vec4(posLocal,1.0);
   v_worldPos = worldPos4.xyz;
   v_worldNormal = normalize(mat3(u_world)*nLocal);
-  v_height = radius;
+  v_height = radius - u_baseRadius;
 
   gl_Position = u_viewProjection * worldPos4;
 }
@@ -89,45 +91,86 @@ precision highp float;
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
 in float v_height;
+in vec3 v_localPos;
 
-uniform float u_baseRadius;
 uniform float u_ocean;
 uniform float u_beach;
 uniform float u_mountain;
 uniform float u_snow;
 
+uniform sampler2D u_texGrass;
+uniform sampler2D u_texRock;
+uniform float u_texScale;
+
 out vec4 outColor;
 
 float band(float a,float b,float x){ return smoothstep(a,b,x); }
 
-void main() {
+vec3 triplanarSample(sampler2D tex, vec3 localPos, vec3 worldN, float scale) {
+  vec3 n = normalize(worldN);
+  vec3 w = pow(abs(n), vec3(4.0));
+  w /= (w.x + w.y + w.z + 1e-6);
 
+  // ✅ IMPORTANT: usa LOCAL POS (fixa no planeta, sem “esteira”)
+  vec2 uvX = localPos.yz * scale;
+  vec2 uvY = localPos.xz * scale;
+  vec2 uvZ = localPos.xy * scale;
+
+  vec3 cx = texture(tex, uvX).rgb;
+  vec3 cy = texture(tex, uvY).rgb;
+  vec3 cz = texture(tex, uvZ).rgb;
+
+  return cx * w.x + cy * w.y + cz * w.z;
+}
+
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+void main() {
   vec3 n = normalize(v_worldNormal);
+
+  // luz simples
   vec3 lightDir = normalize(vec3(1.0,1.0,1.0));
   float light = dot(n,lightDir)*0.5 + 0.5;
 
-  float h = v_height - u_baseRadius;
+  // aqui h deve ser ALTURA relativa (radius - baseRadius)
+  float h = v_height;
 
-  vec3 oceanCol = vec3(0.05,0.25,0.55);
-  vec3 beachCol = vec3(0.85,0.80,0.55);
-  vec3 grassCol = vec3(0.12,0.55,0.20);
-  vec3 rockCol  = vec3(0.45);
-  vec3 snowCol  = vec3(0.92);
+  vec3 oceanCol  = vec3(0.05,0.25,0.55);
+  vec3 beachCol  = vec3(0.85,0.80,0.55);
+  vec3 grassBase = vec3(0.12,0.55,0.20);
+  vec3 rockBase  = vec3(0.45);
+  vec3 snowCol   = vec3(0.92);
 
-  float tOcean = band(u_ocean-0.5, u_ocean+0.5, h);
-  float tBeach = band(u_beach-0.5, u_beach+0.5, h);
-  float tMount = band(u_mountain-0.5, u_mountain+0.5, h);
-  float tSnow  = band(u_snow-0.5, u_snow+0.5, h);
+  float tOcean = band(u_ocean-0.5,     u_ocean+0.5,     h);
+  float tBeach = band(u_beach-0.5,     u_beach+0.5,     h);
+  float tMount = band(u_mountain-0.5,  u_mountain+0.5,  h);
+  float tSnow  = band(u_snow-0.5,      u_snow+0.5,      h);
+
+  // texturas amostradas em LOCAL (fixo no planeta)
+  vec3 grassTex = triplanarSample(u_texGrass, v_localPos, n, u_texScale);
+  vec3 rockTex  = triplanarSample(u_texRock,  v_localPos, n, u_texScale);
+
+  // detalhe suave (não destrói a cor do bioma)
+  float g = mix(0.7, 1.3, luma(grassTex));
+  float r = mix(0.7, 1.3, luma(rockTex));
 
   vec3 col = oceanCol;
   col = mix(col, beachCol, tOcean);
-  col = mix(col, grassCol, tBeach);
-  col = mix(col, rockCol,  tMount);
-  col = mix(col, snowCol,  tSnow);
 
-  outColor = vec4(col*light,1.0);
+  vec3 grassCol = grassBase * g;
+  col = mix(col, grassCol, tBeach);
+
+  vec3 rockCol = rockBase * r;
+  col = mix(col, rockCol, tMount);
+
+  col = mix(col, snowCol, tSnow);
+
+  outColor = vec4(col * light, 1.0);
 }
 `;
+
+
+
 
 
 // água oceano
@@ -203,6 +246,13 @@ in vec4 a_iWorld1;
 in vec4 a_iWorld2;
 in vec4 a_iWorld3;
 
+
+uniform float u_time;
+uniform float u_isFish;      // 0.0 = árvore, 1.0 = peixe
+uniform float u_swimAmp;     // amplitude (força)
+uniform float u_swimFreq;    // frequência ao longo do corpo
+uniform float u_swimSpeed;   // velocidade do ciclo
+
 uniform mat4 u_viewProjection;
 uniform mat4 u_world;          // rotação do planeta (mouse+auto)
 
@@ -255,6 +305,8 @@ void main() {
 `;
 
 export const vsPick = `#version 300 es
+precision highp float;
+
 in vec4 a_position;
 
 in vec4 a_iWorld0;
@@ -265,20 +317,35 @@ in vec4 a_iWorld3;
 uniform mat4 u_viewProjection;
 uniform mat4 u_world;
 
+flat out int v_id;
+
 void main() {
-  mat4 instWorld = mat4(a_iWorld0, a_iWorld1, a_iWorld2, a_iWorld3);
-  gl_Position = u_viewProjection * u_world * instWorld * a_position;
+  // monta matrix da instância
+  mat4 iWorld = mat4(a_iWorld0, a_iWorld1, a_iWorld2, a_iWorld3);
+
+  // id único por instância
+  v_id = gl_InstanceID + 1;
+
+  // posição
+  vec4 worldPos = u_world * (iWorld * a_position);
+  gl_Position = u_viewProjection * worldPos;
 }
 `;
-
 export const fsPick = `#version 300 es
 precision highp float;
 
-uniform vec4 u_id;
+flat in int v_id;
 out vec4 outColor;
 
+vec3 encodeId(int id) {
+  int r =  id        & 255;
+  int g = (id >> 8)  & 255;
+  int b = (id >> 16) & 255;
+  return vec3(float(r), float(g), float(b)) / 255.0;
+}
+
 void main() {
-  outColor = u_id;
+  outColor = vec4(encodeId(v_id), 1.0);
 }
 `;
 
