@@ -839,7 +839,46 @@ _rebuildFishInstances() {
     this._rebuildTreeInstances();
     return true;
   }
+  // iluminação Shadow
+  drawShadow(programShadow, lightVP, worldMatrix) {
+  const gl = this.gl;
 
+  gl.useProgram(programShadow.program);
+
+  if (this.treeInst.vao && this.treeInst.count > 0) {
+    gl.bindVertexArray(this.treeInst.vao);
+    this.twgl.setUniforms(programShadow, {
+      u_lightVP: lightVP,
+      u_world: worldMatrix
+    });
+    this.twgl.drawBufferInfo(
+      gl,
+      this.treeInst.bufferInfo,
+      gl.TRIANGLES,
+      this.treeInst.bufferInfo.numElements,
+      0,
+      this.treeInst.count
+    );
+  }
+
+  if (this.fishInst.vao && this.fishInst.count > 0) {
+    gl.bindVertexArray(this.fishInst.vao);
+    this.twgl.setUniforms(programShadow, {
+      u_lightVP: lightVP,
+      u_world: worldMatrix
+    });
+    this.twgl.drawBufferInfo(
+      gl,
+      this.fishInst.bufferInfo,
+      gl.TRIANGLES,
+      this.fishInst.bufferInfo.numElements,
+      0,
+      this.fishInst.count
+    );
+  }
+
+  gl.bindVertexArray(null);
+}
   drawObjects(viewProjection, worldMatrix, timeSec) {
   const gl = this.gl;
 

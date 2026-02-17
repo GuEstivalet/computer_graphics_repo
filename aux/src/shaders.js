@@ -14,11 +14,13 @@ uniform float u_noiseAmp;
 uniform float u_noiseFreq;
 uniform float u_seed;
 uniform int   u_octaves;
+uniform mat4 u_lightVP;
 
 out vec3 v_worldPos;
 out vec3 v_worldNormal;
 out float v_height;
 out vec3 v_localPos;
+out vec4 v_shadowPos;
 
 // ---------- Noise ----------
 
@@ -82,6 +84,7 @@ void main() {
   v_height = radius - u_baseRadius;
 
   gl_Position = u_viewProjection * worldPos4;
+  v_shadowPos = u_lightVP * worldPos4;
 }
 `;
 
@@ -91,7 +94,7 @@ precision highp float;
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
 in float v_height;
-in vec3 v_localPos;
+in vec3 v_localPos; // se você estiver usando pro triplanar fixo no planeta
 
 uniform float u_ocean;
 uniform float u_beach;
@@ -101,21 +104,31 @@ uniform float u_snow;
 uniform sampler2D u_texGrass;
 uniform sampler2D u_texRock;
 uniform float u_texScale;
-uniform vec3 u_lightDir;
+
+// --- sombras ---
+uniform sampler2D u_shadowMap;   // depth texture (R)
+uniform mat4 u_lightVP;          // lightViewProj
+uniform vec3 u_lightDir;         // direção da luz (normalizada)
+
+// iluminação
+uniform float u_ambient;         // ex: 0.05
+uniform float u_diffuse;         // ex: 1.10
 
 out vec4 outColor;
 
 float band(float a,float b,float x){ return smoothstep(a,b,x); }
 
-vec3 triplanarSample(sampler2D tex, vec3 localPos, vec3 worldN, float scale) {
-  vec3 n = normalize(worldN);
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+// triplanar (use v_localPos para ficar "fixo" no planeta)
+vec3 triplanarSample(sampler2D tex, vec3 P, vec3 N, float scale) {
+  vec3 n = normalize(N);
   vec3 w = pow(abs(n), vec3(4.0));
   w /= (w.x + w.y + w.z + 1e-6);
 
-  // ✅ IMPORTANT: usa LOCAL POS (fixa no planeta, sem “esteira”)
-  vec2 uvX = localPos.yz * scale;
-  vec2 uvY = localPos.xz * scale;
-  vec2 uvZ = localPos.xy * scale;
+  vec2 uvX = P.yz * scale;
+  vec2 uvY = P.xz * scale;
+  vec2 uvZ = P.xy * scale;
 
   vec3 cx = texture(tex, uvX).rgb;
   vec3 cy = texture(tex, uvY).rgb;
@@ -124,35 +137,55 @@ vec3 triplanarSample(sampler2D tex, vec3 localPos, vec3 worldN, float scale) {
   return cx * w.x + cy * w.y + cz * w.z;
 }
 
-float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+float shadowFactor(vec3 worldPos, vec3 worldN) {
+  vec4 lp = u_lightVP * vec4(worldPos, 1.0);
+
+  // NDC
+  vec3 ndc = lp.xyz / lp.w;
+
+  // UV em 0..1
+  vec2 uv = ndc.xy * 0.5 + 0.5;
+
+  // depth em 0..1  ESSA LINHA É O PONTO-CRÍTICO
+  float cur = ndc.z * 0.5 + 0.5;
+
+  // fora do frustum da luz => não sombreia
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
+  if (cur < 0.0 || cur > 1.0) return 1.0;
+
+  // depth gravado no shadow map (0..1)
+  float dep = texture(u_shadowMap, uv).r;
+
+  // bias simples (evita acne). Ajuste se precisar.
+  float bias = max(0.0015, 0.0025 * (1.0 - dot(normalize(worldN), normalize(u_lightDir))));
+
+  // se cur está "atrás" do depth gravado -> em sombra
+  return (cur - bias > dep) ? 0.0 : 1.0;
+}
 
 void main() {
   vec3 n = normalize(v_worldNormal);
 
-  // luz simples
-  vec3 lightDir = normalize(u_lightDir);
-  float ndl = max(dot(n, lightDir), 0.0);
-  float light = 0.08 + ndl * 0.92;   // 8% ambiente + 92% difuso
-
-  // aqui h deve ser ALTURA relativa (radius - baseRadius)
+  // altura relativa (v_height já é relativo no seu setup atual)
   float h = v_height;
 
-  vec3 oceanCol  = vec3(0.05,0.25,0.55);
-  vec3 beachCol  = vec3(0.85,0.80,0.55);
+  // máscaras bioma
+  float tOcean = band(u_ocean-0.5,    u_ocean+0.5,    h);
+  float tBeach = band(u_beach-0.5,    u_beach+0.5,    h);
+  float tMount = band(u_mountain-0.5, u_mountain+0.5, h);
+  float tSnow  = band(u_snow-0.5,     u_snow+0.5,     h);
+
+  // cores base
+  vec3 oceanCol = vec3(0.05,0.25,0.55);
+  vec3 beachCol = vec3(0.85,0.80,0.55);
   vec3 grassBase = vec3(0.12,0.55,0.20);
   vec3 rockBase  = vec3(0.45);
   vec3 snowCol   = vec3(0.92);
 
-  float tOcean = band(u_ocean-0.5,     u_ocean+0.5,     h);
-  float tBeach = band(u_beach-0.5,     u_beach+0.5,     h);
-  float tMount = band(u_mountain-0.5,  u_mountain+0.5,  h);
-  float tSnow  = band(u_snow-0.5,      u_snow+0.5,      h);
-
-  // texturas amostradas em LOCAL (fixo no planeta)
+  // textura como detalhe (use v_localPos pra ficar "fixa" ao planeta)
   vec3 grassTex = triplanarSample(u_texGrass, v_localPos, n, u_texScale);
   vec3 rockTex  = triplanarSample(u_texRock,  v_localPos, n, u_texScale);
 
-  // detalhe suave (não destrói a cor do bioma)
   float g = mix(0.7, 1.3, luma(grassTex));
   float r = mix(0.7, 1.3, luma(rockTex));
 
@@ -167,8 +200,14 @@ void main() {
 
   col = mix(col, snowCol, tSnow);
 
-  outColor = vec4(col * light, 1.0);
-}
+  float ndl = max(dot(n, normalize(u_lightDir)), 0.0);
+  float sh  = shadowFactor(v_worldPos, n);
+
+  // sombra só afeta o difuso; o ambiente fica sempre
+  float lightTerm = u_ambient + (u_diffuse * ndl) * sh;
+
+  outColor = vec4(col * lightTerm, 1.0);
+  }
 `;
 
 
@@ -568,5 +607,139 @@ void main() {
   if (a < 0.01) discard;
 
   outColor = vec4(col, a);
+}
+`;
+
+export const vsShadow = `#version 300 es
+precision highp float;
+
+in vec4 a_position;
+in vec3 a_normal;
+
+uniform mat4 u_lightVP;
+uniform mat4 u_world;
+
+// --- MESMOS UNIFORMS DO PLANETA (pra bater 1:1) ---
+uniform float u_baseRadius;
+uniform float u_noiseAmp;
+uniform float u_noiseFreq;
+uniform float u_seed;
+uniform int   u_octaves;
+
+// se você estiver usando o “relevo por bioma” no vsPlanet, inclua também:
+uniform float u_ocean;
+uniform float u_beach;
+uniform float u_mountain;
+uniform float u_snow;
+
+uniform float u_oceanDepth;
+uniform float u_landLift;
+uniform float u_mountainLift;
+uniform float u_biomeBlend;
+
+// ---------- Noise (igual ao vsPlanet) ----------
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+float valueNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+
+  float n000 = hash31(i + vec3(0,0,0));
+  float n100 = hash31(i + vec3(1,0,0));
+  float n010 = hash31(i + vec3(0,1,0));
+  float n110 = hash31(i + vec3(1,1,0));
+  float n001 = hash31(i + vec3(0,0,1));
+  float n101 = hash31(i + vec3(1,0,1));
+  float n011 = hash31(i + vec3(0,1,1));
+  float n111 = hash31(i + vec3(1,0,1) + vec3(0,0,1)); // (equivalente ao i+vec3(1,1,1))
+
+  float nx00 = mix(n000, n100, u.x);
+  float nx10 = mix(n010, n110, u.x);
+  float nx01 = mix(n001, n101, u.x);
+  float nx11 = mix(n011, n111, u.x);
+
+  float nxy0 = mix(nx00, nx10, u.y);
+  float nxy1 = mix(nx01, nx11, u.y);
+
+  return mix(nxy0, nxy1, u.z);
+}
+
+float fbm(vec3 p, float seed, int octaves) {
+  float sum = 0.0;
+  float amp = 0.5;
+  float freq = 1.0;
+  vec3 off = vec3(seed, seed*1.37, seed*2.11);
+
+  for (int i = 0; i < 12; i++) {
+    if (i >= octaves) break;
+    sum += (valueNoise(p * freq + off) * 2.0 - 1.0) * amp;
+    freq *= 2.0;
+    amp  *= 0.5;
+  }
+  return sum;
+}
+
+float band(float a, float b, float x) { return smoothstep(a, b, x); }
+
+void main() {
+  vec3 nLocal = normalize(a_normal);
+
+  // 1) ruido base igual ao vsPlanet
+  float n = fbm(nLocal * u_noiseFreq, u_seed, u_octaves);
+  float h = n * u_noiseAmp;          // altura relativa
+  float radius = u_baseRadius + h;   // raio final (base)
+
+  // 2) Se no seu vsPlanet você tem relevo por bioma, APLIQUE IGUAL AQUI
+  //    (se não tiver, pode deixar que ainda vai corrigir bastante)
+  float tOcean = band(u_ocean-0.5,    u_ocean+0.5,    h);
+  float tBeach = band(u_beach-0.5,    u_beach+0.5,    h);
+  float tMount = band(u_mountain-0.5, u_mountain+0.5, h);
+
+  float biomeLift = 0.0;
+  biomeLift += (-u_oceanDepth) * tOcean;
+  biomeLift += ( u_landLift)   * tBeach;
+  biomeLift += ( u_mountainLift) * tMount;
+
+  radius += biomeLift * u_biomeBlend;
+
+  vec3 posLocal = nLocal * radius;
+
+  vec4 worldPos = u_world * vec4(posLocal, 1.0);
+  gl_Position = u_lightVP * worldPos;
+}
+`;
+
+export const fsShadow = `#version 300 es
+precision highp float;
+void main() { }
+`;
+
+export const vsShadowObj = `#version 300 es
+precision highp float;
+
+in vec4 a_position;
+
+in vec4 a_iWorld0;
+in vec4 a_iWorld1;
+in vec4 a_iWorld2;
+in vec4 a_iWorld3;
+
+uniform mat4 u_lightVP;
+uniform mat4 u_world;   // rotação do planeta
+
+mat4 instanceWorld() {
+  return mat4(a_iWorld0, a_iWorld1, a_iWorld2, a_iWorld3);
+}
+
+void main() {
+  mat4 iw = instanceWorld();
+  mat4 W = u_world * iw;
+  vec4 worldPos = W * a_position;
+  gl_Position = u_lightVP * worldPos;
 }
 `;

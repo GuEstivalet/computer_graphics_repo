@@ -2,7 +2,7 @@
 "use strict";
 
 import { Renderer } from "./Renderer.js";
-import { vsPlanet, fsPlanet, vsWater, fsWater, vsBg, fsBg, vsPollen, fsPollen } from "./shaders.js";
+import { vsPlanet, fsPlanet, vsWater, fsWater, vsBg, fsBg, vsPollen, fsPollen, vsShadow, fsShadow } from "./shaders.js";
 import { v3normalize } from "./Placement.js";
 import { displacedRadius } from "./noise.js";
 
@@ -180,8 +180,42 @@ function main() {
   const programWater = twgl.createProgramInfo(gl, [vsWater, fsWater]);
   const programBg = twgl.createProgramInfo(gl, [vsBg, fsBg]);
   const programPollen = twgl.createProgramInfo(gl, [vsPollen, fsPollen]);
+  const programShadow = twgl.createProgramInfo(gl, [vsShadow, fsShadow]);
 
+  // Iluminação complexa
+    const SHADOW_SIZE = 2048;
 
+    const shadowDepthTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, shadowDepthTexture);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.DEPTH_COMPONENT24,
+      SHADOW_SIZE,
+      SHADOW_SIZE,
+      0,
+      gl.DEPTH_COMPONENT,
+      gl.UNSIGNED_INT,
+      null
+    );
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const shadowFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.DEPTH_ATTACHMENT,
+      gl.TEXTURE_2D,
+      shadowDepthTexture,
+      0
+    );
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    
 
   // -------------------------
   // Esfera (shared)
@@ -513,7 +547,6 @@ canvas.addEventListener("click", (e) => {
   gl.depthFunc(gl.LESS);
   gl.depthMask(true);
   gl.disable(gl.BLEND);
-
   // --- MATRIZES ---
   const fov = Math.PI * 0.25;
   const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
@@ -591,6 +624,58 @@ viewProjection = m4.multiply(projection, viewMatrix);
   viewMatrix = m4.inverse(cameraMatrix);
   viewProjection = m4.multiply(projection, viewMatrix);
 
+
+  // Iluminação shadow
+  const lightPos = [
+  lightDir[0] * data.radius * 6,
+  lightDir[1] * data.radius * 6,
+  lightDir[2] * data.radius * 6
+  ];
+
+  const lightTarget = [0,0,0];
+  const lightUp = [0,1,0];
+
+  const lightView = m4.inverse(m4.lookAt(lightPos, lightTarget, lightUp));
+  const lightProj = m4.orthographic(
+    -data.radius*3,
+    data.radius*3,
+    -data.radius*3,
+    data.radius*3,
+    1,
+    data.radius*10
+  );
+
+  const lightVP = m4.multiply(lightProj, lightView);
+
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+  gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+
+  // estados importantes
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LESS);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+
+  // reduz acne: cull front no shadow pass
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.FRONT);
+
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+
+  gl.useProgram(programShadow.program);
+
+  // só objetos no shadow map
+  renderer.drawShadow(programShadow, lightVP, worldMatrix);
+
+  // restaura
+  gl.cullFace(gl.BACK);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+  
+
+
   // 1) PLANETA (OPACO)
   gl.useProgram(programPlanet.program);
   gl.bindVertexArray(sphereVaoPlanet);
@@ -617,6 +702,8 @@ viewProjection = m4.multiply(projection, viewMatrix);
     u_cameraPos: cameraPosition,
     u_ambient: 0.03,   // baixo para “lado escuro quase preto”
     u_diffuse: 1.1,
+    u_shadowMap: shadowDepthTexture,
+    u_lightVP: lightVP,
   });
 
   twgl.drawBufferInfo(gl, sphereBufferInfo, data.triangles ? gl.TRIANGLES : gl.LINES);
