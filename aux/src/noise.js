@@ -1,5 +1,5 @@
 // ==========================
-// NOISE + FBM (CPU version)
+// NOISE + FBM (na CPU)
 // ==========================
 
 function fract(x) {

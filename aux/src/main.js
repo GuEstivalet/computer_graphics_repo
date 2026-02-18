@@ -1,8 +1,17 @@
 // src/main.js
 "use strict";
 
+// =========================================================
+// IMPORTS / GLOBALS
+// =========================================================
 import { Renderer } from "./Renderer.js";
-import { vsPlanet, fsPlanet, vsWater, fsWater, vsBg, fsBg, vsPollen, fsPollen, vsShadow, fsShadow } from "./shaders.js";
+import {
+  vsPlanet, fsPlanet,
+  vsWater, fsWater,
+  vsBg, fsBg,
+  vsPollen, fsPollen,
+  vsShadow, fsShadow,
+} from "./shaders.js";
 import { v3normalize } from "./Placement.js";
 import { displacedRadius } from "./noise.js";
 
@@ -11,6 +20,9 @@ const twgl = window.twgl;
 const m4 = window.m4;
 const webglLessonsUI = window.webglLessonsUI;
 
+// =========================================================
+// PICKING / RAYCAST HELPERS
+// =========================================================
 
 // func para picktree
 function getPickRay(canvas, projection, viewMatrix, clientX, clientY) {
@@ -29,8 +41,7 @@ function getPickRay(canvas, projection, viewMatrix, clientX, clientY) {
 
   const dir = v3normalize([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]);
   return { origin: p0, dir };
-} 
-
+}
 
 function raySphere(origin, dir, radius) {
   const ox = origin[0],
@@ -56,8 +67,13 @@ function raySphere(origin, dir, radius) {
   return [ox + dx * t, oy + dy * t, oz + dz * t];
 }
 
-
+// =========================================================
+// APP ENTRY
+// =========================================================
 function main() {
+  // -------------------------
+  // Boot / Context
+  // -------------------------
   if (!twgl || !m4) {
     alert("twgl/m4 não carregaram. Confira os <script src=...> no HTML.");
     return;
@@ -129,97 +145,112 @@ function main() {
     oceanDepth: 2.5,     // quanto “afunda” o oceano
     landLift: 0.0,       // se quiser a terra um pouco acima do base
     mountainLift: 6.0,   // altura dos picos
-    biomeBlend: 0.8
+    biomeBlend: 0.8,
+
   };
 
+  // -------------------------
+  // UI
+  // -------------------------
   if (webglLessonsUI) {
     webglLessonsUI.setupUI(document.querySelector("#ui"), data, [
-      { type: "slider", key: "cameraZoom", min: 1.5, max: 8, step: 0.1, precision: 1 },
-      { type: "slider", key: "planetNoiseAmp", min: 0, max: 40, step: 0.5, precision: 1 },
-      { type: "slider", key: "planetNoiseFreq", min: 0.1, max: 12, step: 0.1, precision: 1 },
-      { type: "slider", key: "seed", min: 0, max: 50, step: 0.1, precision: 1 },
-      { type: "slider", key: "octaves", min: 1, max: 10, step: 1 },
+    { type: "slider", key: "cameraZoom", min: 1.5, max: 8, step: 0.1, precision: 1 },
 
-      { type: "slider", key: "ocean", min: -20, max: 10, step: 0.5, precision: 1 },
-      { type: "slider", key: "beach", min: -10, max: 20, step: 0.5, precision: 1 },
-      { type: "slider", key: "mountain", min: 0, max: 30, step: 0.5, precision: 1 },
-      { type: "slider", key: "snow", min: 0, max: 50, step: 0.5, precision: 1 },
+    { type: "slider", key: "planetNoiseAmp", min: 0, max: 40, step: 0.5, precision: 1 },
+    { type: "slider", key: "planetNoiseFreq", min: 0.1, max: 12, step: 0.1, precision: 1 },
+    { type: "slider", key: "seed", min: 0, max: 50, step: 0.1, precision: 1 },
+    { type: "slider", key: "octaves", min: 1, max: 10, step: 1 },
 
-      { type: "slider", key: "waterOffset", min: 0.0, max: 10.0, step: 0.1, precision: 1 },
-      { type: "slider", key: "waveAmp", min: 0.0, max: 4.0, step: 0.05, precision: 2 },
-      { type: "slider", key: "waveSpeed", min: 0.0, max: 5.0, step: 0.05, precision: 2 },
-      { type: "slider", key: "waterNoiseAmp", min: 0.0, max: 2.0, step: 0.02, precision: 2 },
-      { type: "slider", key: "waterNoiseFreq", min: 0.1, max: 30.0, step: 0.1, precision: 1 },
-      
-      { type: "slider", key: "lightX", min: -1.0, max: 1.0, step: 0.01, precision: 2 },
-{ type: "slider", key: "lightY", min: -1.0, max: 1.0, step: 0.01, precision: 2 },
-      { type: "checkbox", key: "triangles" },
+    { type: "slider", key: "ocean", min: -20, max: 10, step: 0.5, precision: 1 },
+    { type: "slider", key: "beach", min: -10, max: 20, step: 0.5, precision: 1 },
+    { type: "slider", key: "mountain", min: 0, max: 30, step: 0.5, precision: 1 },
+    { type: "slider", key: "snow", min: 0, max: 50, step: 0.5, precision: 1 },
+
+    // água: manter apenas offset (removidos waveAmp/waveSpeed/waterNoiseAmp/waterNoiseFreq)
+    { type: "slider", key: "waterOffset", min: 0.0, max: 10.0, step: 0.1, precision: 1 },
+
+    // luz
+    { type: "slider", key: "lightX", min: -1.0, max: 1.0, step: 0.01, precision: 2 },
+    { type: "slider", key: "lightY", min: -1.0, max: 1.0, step: 0.01, precision: 2 },
+    { type: "slider", key: "fishScale", min: 0.1, max: 5.0, step: 0.05, precision: 2 },
+    { type: "slider", key: "subdivisionsAxis", min: 8, max: 360, step: 1 },
+    { type: "slider", key: "subdivisionsHeight", min: 4, max: 240, step: 1 },
+
+    { type: "checkbox", key: "triangles" },
     ]);
   }
 
+  // =========================================================
+  // ASSETS / TEXTURES
+  // =========================================================
+
   //criando texturas
-    const texGrass = twgl.createTexture(gl, {
-      src: "texture/grass_detail.jpg",
-      min: gl.LINEAR_MIPMAP_LINEAR,
-      mag: gl.LINEAR,
-      wrap: gl.REPEAT,
-    });
+  const texGrass = twgl.createTexture(gl, {
+    src: "texture/grass_detail.jpg",
+    min: gl.LINEAR_MIPMAP_LINEAR,
+    mag: gl.LINEAR,
+    wrap: gl.REPEAT,
+  });
 
-    const texRock = twgl.createTexture(gl, {
-      src: "texture/rock_detail.jpg",
-      min: gl.LINEAR_MIPMAP_LINEAR,
-      mag: gl.LINEAR,
-      wrap: gl.REPEAT,
-    });
+  const texRock = twgl.createTexture(gl, {
+    src: "texture/rock_detail.jpg",
+    min: gl.LINEAR_MIPMAP_LINEAR,
+    mag: gl.LINEAR,
+    wrap: gl.REPEAT,
+  });
 
+  // =========================================================
+  // PROGRAMS / SHADERS
+  // =========================================================
 
-  // -------------------------
   // Programs planeta/água
-  // -------------------------
   const programPlanet = twgl.createProgramInfo(gl, [vsPlanet, fsPlanet]);
   const programWater = twgl.createProgramInfo(gl, [vsWater, fsWater]);
   const programBg = twgl.createProgramInfo(gl, [vsBg, fsBg]);
   const programPollen = twgl.createProgramInfo(gl, [vsPollen, fsPollen]);
   const programShadow = twgl.createProgramInfo(gl, [vsShadow, fsShadow]);
 
+  // =========================================================
+  // SHADOW MAP SETUP
+  // =========================================================
+
   // Iluminação complexa
-    const SHADOW_SIZE = 2048;
+  const SHADOW_SIZE = 2048;
 
-    const shadowDepthTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, shadowDepthTexture);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.DEPTH_COMPONENT24,
-      SHADOW_SIZE,
-      SHADOW_SIZE,
-      0,
-      gl.DEPTH_COMPONENT,
-      gl.UNSIGNED_INT,
-      null
-    );
+  const shadowDepthTexture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, shadowDepthTexture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.DEPTH_COMPONENT24,
+    SHADOW_SIZE,
+    SHADOW_SIZE,
+    0,
+    gl.DEPTH_COMPONENT,
+    gl.UNSIGNED_INT,
+    null
+  );
 
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    const shadowFramebuffer = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.DEPTH_ATTACHMENT,
-      gl.TEXTURE_2D,
-      shadowDepthTexture,
-      0
-    );
+  const shadowFramebuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.DEPTH_ATTACHMENT,
+    gl.TEXTURE_2D,
+    shadowDepthTexture,
+    0
+  );
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-  // -------------------------
-  // Esfera (shared)
-  // -------------------------
+  // =========================================================
+  // GEOMETRY: SPHERE (SHARED)
+  // =========================================================
   let sphereBufferInfo = null;
   let sphereVaoPlanet = null;
   let sphereVaoWater = null;
@@ -237,49 +268,55 @@ function main() {
 
   rebuildSphere();
 
+  let lastSphereKey = `${data.subdivisionsAxis}|${data.subdivisionsHeight}`;
 
-// quantidade de partículas
-const POLLEN_COUNT = 1200;
+  // =========================================================
+  // PARTICLES: POLLEN
+  // =========================================================
 
-// atributos: up (vec3), phase (float), speed (float), size (float)
-const pollenUp = new Float32Array(POLLEN_COUNT * 3);
-const pollenPhase = new Float32Array(POLLEN_COUNT);
-const pollenSpeed = new Float32Array(POLLEN_COUNT);
-const pollenSize = new Float32Array(POLLEN_COUNT);
+  // quantidade de partículas
+  const POLLEN_COUNT = 1200;
 
-// amostra direções uniformes na esfera (fibonacci)
-function fibDir(i, n) {
-  const phi = Math.PI * (3 - Math.sqrt(5));
-  const y = 1 - (i / (n - 1)) * 2;
-  const r = Math.sqrt(Math.max(0, 1 - y * y));
-  const t = phi * i;
-  return [Math.cos(t) * r, y, Math.sin(t) * r];
-}
+  // atributos: up (vec3), phase (float), speed (float), size (float)
+  const pollenUp = new Float32Array(POLLEN_COUNT * 3);
+  const pollenPhase = new Float32Array(POLLEN_COUNT);
+  const pollenSpeed = new Float32Array(POLLEN_COUNT);
+  const pollenSize = new Float32Array(POLLEN_COUNT);
 
-for (let i = 0; i < POLLEN_COUNT; i++) {
-  const up = fibDir(i + 1, POLLEN_COUNT + 2);
+  // amostra direções uniformes na esfera (fibonacci)
+  function fibDir(i, n) {
+    const phi = Math.PI * (3 - Math.sqrt(5));
+    const y = 1 - (i / (n - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const t = phi * i;
+    return [Math.cos(t) * r, y, Math.sin(t) * r];
+  }
 
-  pollenUp[i * 3 + 0] = up[0];
-  pollenUp[i * 3 + 1] = up[1];
-  pollenUp[i * 3 + 2] = up[2];
+  for (let i = 0; i < POLLEN_COUNT; i++) {
+    const up = fibDir(i + 1, POLLEN_COUNT + 2);
 
-  pollenPhase[i] = Math.random();                  // 0..1
-  pollenSpeed[i] = 0.08 + Math.random() * 0.18;    // velocidade do ciclo
-  pollenSize[i] = 1.5 + Math.random() * 2.2;       // px
-}
+    pollenUp[i * 3 + 0] = up[0];
+    pollenUp[i * 3 + 1] = up[1];
+    pollenUp[i * 3 + 2] = up[2];
 
-const pollenBufferInfo = twgl.createBufferInfoFromArrays(gl, {
-  up:    { numComponents: 3, data: pollenUp },
-  phase: { numComponents: 1, data: pollenPhase },
-  speed: { numComponents: 1, data: pollenSpeed },
-  size:  { numComponents: 1, data: pollenSize },
-});
+    pollenPhase[i] = Math.random();                  // 0..1
+    pollenSpeed[i] = 0.08 + Math.random() * 0.18;    // velocidade do ciclo
+    pollenSize[i] = 1.5 + Math.random() * 2.2;       // px
+  }
 
-// VAO
-const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferInfo);
-  // -------------------------
-  // Renderer de OBJ (árvores/peixes) - mantém o seu
-  // -------------------------
+  const pollenBufferInfo = twgl.createBufferInfoFromArrays(gl, {
+    up: { numComponents: 3, data: pollenUp },
+    phase: { numComponents: 1, data: pollenPhase },
+    speed: { numComponents: 1, data: pollenSpeed },
+    size: { numComponents: 1, data: pollenSize },
+  });
+
+  // VAO
+  const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferInfo);
+
+  // =========================================================
+  // OBJ RENDERER (TREES / FISHES)
+  // =========================================================
   const renderer = new Renderer(canvas, { twgl, m4, displacedRadius });
   Object.assign(renderer.data, {
     radius: data.radius,
@@ -295,6 +332,7 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     fishScale: data.fishScale,
     fishSpeed: data.fishSpeed,
     treeCount: data.treeCount,
+    treeScale: data.treeScale,
     fishCount: data.fishCount,
     oceanDepth: data.oceanDepth,
     landLift: data.landLift,
@@ -303,11 +341,11 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
   });
 
   renderer.loadModels().catch(console.error);
+  renderer.programShadow = programShadow;
 
-
-  // -------------------------
-  // Controle de rotação
-  // -------------------------
+  // =========================================================
+  // INPUT / ROTATION CONTROL
+  // =========================================================
   let autoRotationY = 0;
   let mouseRotationMatrix = m4.identity();
   let pauseRotation = false;
@@ -324,38 +362,39 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
       (y - canvas.height / 2) / window.devicePixelRatio,
     ];
   }
-    
 
-
-
-// LISTENERS
+  // =========================================================
+  // LISTENERS
+  // =========================================================
 
   // para modo jogo
   let followFish = false;
   let followFishIndex = 0;
 
+  canvas.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
 
-  canvas.addEventListener("wheel", (e) => {
-  e.preventDefault();
+      const zoomSpeed = 0.0015; // sensibilidade (ajuste aqui)
 
-  const zoomSpeed = 0.0015; // sensibilidade (ajuste aqui)
+      // deltaY > 0 = scroll pra baixo (zoom out)
+      data.cameraZoom += e.deltaY * zoomSpeed;
 
-  // deltaY > 0 = scroll pra baixo (zoom out)
-  data.cameraZoom += e.deltaY * zoomSpeed;
-
-  // limites seguros
-  data.cameraZoom = Math.max(1.2, Math.min(12.0, data.cameraZoom));
-  }, 
-  { passive: false });
+      // limites seguros
+      data.cameraZoom = Math.max(1.2, Math.min(12.0, data.cameraZoom));
+    },
+    { passive: false }
+  );
 
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
   canvas.addEventListener("mousedown", (e) => {
-  // Verifica se é o botão direito (button 2)
+    // Verifica se é o botão direito (button 2)
     if (e.button === 2) {
       e.preventDefault(); // Evita comportamentos estranhos
       pauseRotation = !pauseRotation; // Se estava true vira false, se false vira true
-      
+
       // Opcional: Log para você testar no console
       console.log("Rotação pausada:", pauseRotation);
     }
@@ -381,6 +420,7 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     mouseRotationMatrix = m4.multiply(inc, mouseRotationMatrix);
     lastPos = pos;
   });
+
   // modo jogo
   window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
@@ -410,9 +450,9 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     }
   });
 
-  // -------------------------
-  // Matrices “atuais” (para pick no mouse)
-  // -------------------------
+  // =========================================================
+  // PICK STATE (MATRICES)
+  // =========================================================
   let projection = m4.identity();
   let viewMatrix = m4.identity();
   let worldMatrix = m4.identity();
@@ -435,79 +475,105 @@ const pollenVao = twgl.createVAOFromBufferInfo(gl, programPollen, pollenBufferIn
     const upLocal = v3normalize(localHit);
 
     if (followFish) renderer.setMouseTargetUpLocal(upLocal);
-      else renderer.setMouseUpLocal(upLocal);
+    else renderer.setMouseUpLocal(upLocal);
   });
 
-canvas.addEventListener("click", (e) => {
-  if (!projection || !viewMatrix || !worldMatrix) return;
+  canvas.addEventListener("click", (e) => {
+    if (!projection || !viewMatrix || !worldMatrix) return;
 
-  const rect = canvas.getBoundingClientRect();
-  const x = Math.floor((e.clientX - rect.left) * (gl.canvas.width / rect.width));
-  const y = Math.floor((e.clientY - rect.top) * (gl.canvas.height / rect.height));
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) * (gl.canvas.width / rect.width));
+    const y = Math.floor((e.clientY - rect.top) * (gl.canvas.height / rect.height));
 
-  // SHIFT + click = remover árvore clicada
-  if (e.shiftKey) {
-    const idx = renderer.pickTreeAtPixel(x, y, viewProjection, worldMatrix);
-    if (idx >= 0) {
-      renderer.removeTreeByIndex(idx);
+    // SHIFT + click = remover árvore clicada
+    if (e.shiftKey) {
+      const idx = renderer.pickTreeAtPixel(x, y, viewProjection, worldMatrix);
+      if (idx >= 0) {
+        renderer.removeTreeByIndex(idx);
+      }
+      return;
     }
-    return;
+
+    // click normal = adicionar árvore no verde (continua igual)
+    const ray = getPickRay(canvas, projection, viewMatrix, e.clientX, e.clientY);
+    const hit = raySphere(ray.origin, ray.dir, data.radius);
+    if (!hit) return;
+
+    const invWorld = m4.inverse(worldMatrix);
+    const localHit = m4.transformPoint(invWorld, hit);
+    const upLocal = v3normalize(localHit);
+
+    renderer.addTreeAtUp(upLocal);
+  });
+
+  // =========================================================
+  // RELIEF CHANGE TRACKING
+  // =========================================================
+  let lastReliefKey = "";
+
+  function reliefKey(d) {
+    return [
+      d.radius, d.planetNoiseAmp, d.planetNoiseFreq, d.seed, d.octaves,
+      d.oceanDepth, d.landLift, d.mountainLift, d.biomeBlend,
+      d.ocean, d.beach, d.mountain
+    ].join("|");
   }
 
-  // click normal = adicionar árvore no verde (continua igual)
-  const ray = getPickRay(canvas, projection, viewMatrix, e.clientX, e.clientY);
-  const hit = raySphere(ray.origin, ray.dir, data.radius);
-  if (!hit) return;
-
-  const invWorld = m4.inverse(worldMatrix);
-  const localHit = m4.transformPoint(invWorld, hit);
-  const upLocal = v3normalize(localHit);
-
-  renderer.addTreeAtUp(upLocal);
-});
-
-
-  // -------------------------
-  // Render loop
-  // -------------------------
+  // =========================================================
+  // RENDER LOOP
+  // =========================================================
   gl.enable(gl.DEPTH_TEST);
 
   let lastTime = 0;
 
   function renderFrame(timeMs) {
-  const t = timeMs * 0.001;
-  const dt = t - lastTime;
-  lastTime = t;
+    const t = timeMs * 0.001;
+    const dt = t - lastTime;
+    lastTime = t;
 
-  // mantém renderer sincronizado com UI
-  Object.assign(renderer.data, {
-    radius: data.radius,
-    planetNoiseAmp: data.planetNoiseAmp,
-    planetNoiseFreq: data.planetNoiseFreq,
-    seed: data.seed,
-    octaves: data.octaves,
+    const sphereKey = `${data.subdivisionsAxis}|${data.subdivisionsHeight}`;
+    if (sphereKey !== lastSphereKey) {
+      lastSphereKey = sphereKey;
+      rebuildSphere();
+    }
+    // mantém renderer sincronizado com UI
+    Object.assign(renderer.data, {
+      radius: data.radius,
+      planetNoiseAmp: data.planetNoiseAmp,
+      planetNoiseFreq: data.planetNoiseFreq,
+      seed: data.seed,
+      octaves: data.octaves,
 
-    ocean: data.ocean,
-    beach: data.beach,
-    mountain: data.mountain,
+      ocean: data.ocean,
+      beach: data.beach,
+      mountain: data.mountain,
 
-    waterOffset: data.waterOffset,
+      waterOffset: data.waterOffset,
 
-    treeCount: data.treeCount,
-    fishCount: data.fishCount,
-    treeScale: data.treeScale,
-    fishScale: data.fishScale,
-    fishSpeed: data.fishSpeed,
-    debugWire: !data.triangles,
-  });
+      treeCount: data.treeCount,
+      fishCount: data.fishCount,
+      treeScale: data.treeScale,
+      fishScale: data.fishScale,
+      treeScale: data.treeScale,
+      fishSpeed: data.fishSpeed,
+      debugWire: !data.triangles,
+    });
 
-  if (!pauseRotation) autoRotationY = t * 0.25;
+    const k = reliefKey(data);
+    if (k !== lastReliefKey) {
+      lastReliefKey = k;
+      renderer.cullTreesThatWouldNeedDisplacement(0.1);
+    }
 
-  twgl.resizeCanvasToDisplaySize(gl.canvas, window.devicePixelRatio);
-  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (!pauseRotation) autoRotationY = t * 0.25;
 
-      // 0) BACKGROUND (estrelas)
+    twgl.resizeCanvasToDisplaySize(gl.canvas, window.devicePixelRatio);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // -------------------------------------------------------
+    // PASS 0: BACKGROUND (estrelas)
+    // -------------------------------------------------------
     gl.disable(gl.DEPTH_TEST);
     gl.depthMask(false);
     gl.disable(gl.BLEND);
@@ -518,11 +584,11 @@ canvas.addEventListener("click", (e) => {
     // Light setup
     const lx = data.lightX;
     const ly = data.lightY;
-    const lz = 0.35; 
+    const lz = 0.35;
     let lightDir = [lx, ly, lz];
     {
       const L = Math.hypot(lightDir[0], lightDir[1], lightDir[2]) || 1;
-      lightDir = [lightDir[0]/L, lightDir[1]/L, lightDir[2]/L];
+      lightDir = [lightDir[0] / L, lightDir[1] / L, lightDir[2] / L];
     }
     renderer.lightDir = lightDir;
 
@@ -542,253 +608,261 @@ canvas.addEventListener("click", (e) => {
     gl.enable(gl.DEPTH_TEST);
     gl.depthMask(true);
 
+    // -------------------------------------------------------
+    // PASS SETUP: STATES + MATRICES
+    // -------------------------------------------------------
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
 
-  gl.enable(gl.DEPTH_TEST);
-  gl.depthFunc(gl.LESS);
-  gl.depthMask(true);
-  gl.disable(gl.BLEND);
-  // --- MATRIZES ---
-  const fov = Math.PI * 0.25;
-  const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+    // --- MATRIZES ---
+    const fov = Math.PI * 0.25;
+    const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
 
-  // near menor ajuda no zoom (se precisar)
-  projection = m4.perspective(fov, aspect, 0.2, 5000);
-  
-  const autoMatrix = m4.yRotation(autoRotationY);
-  worldMatrix = m4.multiply(mouseRotationMatrix, autoMatrix);
+    // near menor ajuda no zoom (se precisar)
+    projection = m4.perspective(fov, aspect, 0.2, 5000);
 
-  // mudança para modo jogo
-  let cameraPosition, target, up;
+    const autoMatrix = m4.yRotation(autoRotationY);
+    worldMatrix = m4.multiply(mouseRotationMatrix, autoMatrix);
 
-  if (!followFish) {
-    const distance = data.radius * data.cameraZoom;
-    cameraPosition = [0, 0, distance];
-    target = [0, 0, 0];
-    up = [0, 1, 0];
-  } else {
-    const pose = renderer.getControlledFishLocalPose();
+    // mudança para modo jogo
+    let cameraPosition, target, up;
 
-    if (!pose) {
+    if (!followFish) {
       const distance = data.radius * data.cameraZoom;
       cameraPosition = [0, 0, distance];
       target = [0, 0, 0];
       up = [0, 1, 0];
     } else {
-      // worldMatrix precisa existir antes 
-      const fishWorldPos = m4.transformPoint(worldMatrix, pose.posLocal);
+      const pose = renderer.getControlledFishLocalPose();
 
-      // vel world
-      const velEnd = m4.transformPoint(worldMatrix, [
-        pose.posLocal[0] + pose.velLocal[0],
-        pose.posLocal[1] + pose.velLocal[1],
-        pose.posLocal[2] + pose.velLocal[2],
-      ]);
-      let fishWorldVel = [
-        velEnd[0] - fishWorldPos[0],
-        velEnd[1] - fishWorldPos[1],
-        velEnd[2] - fishWorldPos[2],
-      ];
-      const vL = Math.hypot(fishWorldVel[0], fishWorldVel[1], fishWorldVel[2]) || 1;
-      fishWorldVel = [fishWorldVel[0]/vL, fishWorldVel[1]/vL, fishWorldVel[2]/vL];
+      if (!pose) {
+        const distance = data.radius * data.cameraZoom;
+        cameraPosition = [0, 0, distance];
+        target = [0, 0, 0];
+        up = [0, 1, 0];
+      } else {
+        // worldMatrix precisa existir antes
+        const fishWorldPos = m4.transformPoint(worldMatrix, pose.posLocal);
 
-      // up world
-      const upEnd = m4.transformPoint(worldMatrix, [
-        pose.posLocal[0] + pose.up[0],
-        pose.posLocal[1] + pose.up[1],
-        pose.posLocal[2] + pose.up[2],
-      ]);
-      let fishWorldUp = [
-        upEnd[0] - fishWorldPos[0],
-        upEnd[1] - fishWorldPos[1],
-        upEnd[2] - fishWorldPos[2],
-      ];
-      const uL = Math.hypot(fishWorldUp[0], fishWorldUp[1], fishWorldUp[2]) || 1;
-      fishWorldUp = [fishWorldUp[0]/uL, fishWorldUp[1]/uL, fishWorldUp[2]/uL];
+        // vel world
+        const velEnd = m4.transformPoint(worldMatrix, [
+          pose.posLocal[0] + pose.velLocal[0],
+          pose.posLocal[1] + pose.velLocal[1],
+          pose.posLocal[2] + pose.velLocal[2],
+        ]);
+        let fishWorldVel = [
+          velEnd[0] - fishWorldPos[0],
+          velEnd[1] - fishWorldPos[1],
+          velEnd[2] - fishWorldPos[2],
+        ];
+        const vL = Math.hypot(fishWorldVel[0], fishWorldVel[1], fishWorldVel[2]) || 1;
+        fishWorldVel = [fishWorldVel[0] / vL, fishWorldVel[1] / vL, fishWorldVel[2] / vL];
 
-      const behind = 10.0;
-      const above  = data.radius * 0.15;
+        // up world
+        const upEnd = m4.transformPoint(worldMatrix, [
+          pose.posLocal[0] + pose.up[0],
+          pose.posLocal[1] + pose.up[1],
+          pose.posLocal[2] + pose.up[2],
+        ]);
+        let fishWorldUp = [
+          upEnd[0] - fishWorldPos[0],
+          upEnd[1] - fishWorldPos[1],
+          upEnd[2] - fishWorldPos[2],
+        ];
+        const uL = Math.hypot(fishWorldUp[0], fishWorldUp[1], fishWorldUp[2]) || 1;
+        fishWorldUp = [fishWorldUp[0] / uL, fishWorldUp[1] / uL, fishWorldUp[2] / uL];
 
-      cameraPosition = [
-        fishWorldPos[0] - fishWorldVel[0]*behind + fishWorldUp[0]*above,
-        fishWorldPos[1] - fishWorldVel[1]*behind + fishWorldUp[1]*above,
-        fishWorldPos[2] - fishWorldVel[2]*behind + fishWorldUp[2]*above,
-      ];
-      target = fishWorldPos;
-      up = fishWorldUp;
+        const behind = 10.0;
+        const above = data.radius * 0.15;
+
+        cameraPosition = [
+          fishWorldPos[0] - fishWorldVel[0] * behind + fishWorldUp[0] * above,
+          fishWorldPos[1] - fishWorldVel[1] * behind + fishWorldUp[1] * above,
+          fishWorldPos[2] - fishWorldVel[2] * behind + fishWorldUp[2] * above,
+        ];
+        target = fishWorldPos;
+        up = fishWorldUp;
+      }
     }
+
+    const cameraMatrix = m4.lookAt(cameraPosition, target, up);
+    viewMatrix = m4.inverse(cameraMatrix);
+    viewProjection = m4.multiply(projection, viewMatrix);
+    viewMatrix = m4.inverse(cameraMatrix);
+    viewProjection = m4.multiply(projection, viewMatrix);
+
+    // -------------------------------------------------------
+    // PASS: SHADOW MAP
+    // -------------------------------------------------------
+    // Iluminação shadow
+    const lightPos = [
+      lightDir[0] * data.radius * 6,
+      lightDir[1] * data.radius * 6,
+      lightDir[2] * data.radius * 6
+    ];
+
+    const lightTarget = [0, 0, 0];
+    const lightUp = [0, 1, 0];
+
+    const lightView = m4.inverse(m4.lookAt(lightPos, lightTarget, lightUp));
+    const lightProj = m4.orthographic(
+      -data.radius * 3,
+      data.radius * 3,
+      -data.radius * 3,
+      data.radius * 3,
+      1,
+      data.radius * 10
+    );
+
+    const lightVP = m4.multiply(lightProj, lightView);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+    gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+
+    // depth-only (forte recomendado)
+    gl.colorMask(false, false, false, false);
+    gl.drawBuffers([gl.NONE]);
+    gl.readBuffer(gl.NONE);
+
+    gl.useProgram(programShadow.program);
+
+    // SÓ OBJETOS no shadow map:
+    renderer.drawShadow(programShadow, lightVP, worldMatrix);
+
+    // restaura
+    gl.colorMask(true, true, true, true);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+    // restaura
+    gl.cullFace(gl.BACK);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+    // -------------------------------------------------------
+    // PASS 1: PLANETA (OPACO)
+    // -------------------------------------------------------
+    gl.useProgram(programPlanet.program);
+    gl.bindVertexArray(sphereVaoPlanet);
+
+    twgl.setUniforms(programPlanet, {
+      u_viewProjection: viewProjection,
+      u_world: worldMatrix,
+
+      u_baseRadius: data.radius,
+      u_noiseAmp: data.planetNoiseAmp,
+      u_noiseFreq: data.planetNoiseFreq,
+      u_seed: data.seed,
+      u_octaves: data.octaves,
+
+      u_ocean: data.ocean,
+      u_beach: data.beach,
+      u_mountain: data.mountain,
+      u_snow: data.snow,
+      u_texGrass: texGrass,
+      u_texRock: texRock,
+      u_texScale: 0.3,
+
+      u_lightDir: lightDir,
+      u_cameraPos: cameraPosition,
+      u_ambient: 0.03,   // baixo para “lado escuro quase preto”
+      u_diffuse: 1.1,
+      u_shadowMap: shadowDepthTexture,
+      u_lightVP: lightVP,
+    });
+
+    twgl.drawBufferInfo(gl, sphereBufferInfo, data.triangles ? gl.TRIANGLES : gl.LINES);
+
+    // -------------------------------------------------------
+    // PASS 2: OBJETOS (OPACOS) — ANTES DA ÁGUA
+    // -------------------------------------------------------
+    gl.disable(gl.BLEND);
+    gl.depthMask(true);
+    renderer.update(dt, t);
+    renderer.drawObjects(viewProjection, worldMatrix, {
+      u_lightDir: lightDir,
+    });
+
+    // -------------------------------------------------------
+    // PASS 3: ÁGUA (TRANSPARENTE) — POR ÚLTIMO
+    // -------------------------------------------------------
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    //  água NÃO escreve depth, senão “some” peixe/árvore atrás dela
+    gl.depthMask(false);
+    gl.depthFunc(gl.LEQUAL);
+
+    gl.useProgram(programWater.program);
+    gl.bindVertexArray(sphereVaoWater);
+
+    twgl.setUniforms(programWater, {
+      u_viewProjection: viewProjection,
+      u_world: worldMatrix,
+
+      u_baseRadius: data.radius,
+      u_waterOffset: data.waterOffset,
+      u_time: t,
+
+      u_waveAmp: data.waveAmp,
+      u_waveLen: data.waveLen,
+      u_waveSpeed: data.waveSpeed,
+
+      u_noiseAmp: data.waterNoiseAmp,
+      u_noiseFreq: data.waterNoiseFreq,
+      u_seed: data.seed,
+      u_octaves: Math.max(1, Math.min(10, data.octaves)),
+
+      u_cameraPos: cameraPosition,
+      u_alpha: data.waterAlpha,
+      u_fresnelPow: data.fresnelPow,
+      u_specPow: data.specPow,
+      u_specStrength: data.specStrength,
+      u_deepness: data.deepness,
+    });
+
+    twgl.drawBufferInfo(gl, sphereBufferInfo, gl.TRIANGLES);
+
+    // -------------------------------------------------------
+    // PASS 4: POLLEN (PARTICLES)
+    // -------------------------------------------------------
+    gl.enable(gl.BLEND);
+
+    // opcional: dá pra deixar um brilho mais "mágico"
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+    gl.enable(gl.DEPTH_TEST);
+    // não escreve no depth pra não “sumir” atrás de si mesmo
+    gl.depthMask(false);
+
+    gl.useProgram(programPollen.program);
+    gl.bindVertexArray(pollenVao);
+
+    twgl.setUniforms(programPollen, {
+      u_viewProjection: viewProjection,
+      u_world: worldMatrix,
+      u_time: t,
+      u_baseRadius: data.radius,
+      u_waterOffset: data.waterOffset,
+    });
+
+    gl.drawArrays(gl.POINTS, 0, POLLEN_COUNT);
+
+    // restaura
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+
+    // --- restaura estados (boa prática) ---
+    gl.depthMask(true);
+    gl.depthFunc(gl.LESS);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(null);
+
+    requestAnimationFrame(renderFrame);
   }
-
-const cameraMatrix = m4.lookAt(cameraPosition, target, up);
-viewMatrix = m4.inverse(cameraMatrix);
-viewProjection = m4.multiply(projection, viewMatrix);
-  viewMatrix = m4.inverse(cameraMatrix);
-  viewProjection = m4.multiply(projection, viewMatrix);
-
-
-  // Iluminação shadow
-  const lightPos = [
-  lightDir[0] * data.radius * 6,
-  lightDir[1] * data.radius * 6,
-  lightDir[2] * data.radius * 6
-  ];
-
-  const lightTarget = [0,0,0];
-  const lightUp = [0,1,0];
-
-  const lightView = m4.inverse(m4.lookAt(lightPos, lightTarget, lightUp));
-  const lightProj = m4.orthographic(
-    -data.radius*3,
-    data.radius*3,
-    -data.radius*3,
-    data.radius*3,
-    1,
-    data.radius*10
-  );
-
-  const lightVP = m4.multiply(lightProj, lightView);
-
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
-  gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
-
-  // estados importantes
-  gl.enable(gl.DEPTH_TEST);
-  gl.depthFunc(gl.LESS);
-  gl.depthMask(true);
-  gl.disable(gl.BLEND);
-
-  // reduz acne: cull front no shadow pass
-  gl.enable(gl.CULL_FACE);
-  gl.cullFace(gl.FRONT);
-
-  gl.clear(gl.DEPTH_BUFFER_BIT);
-
-  gl.useProgram(programShadow.program);
-
-  // só objetos no shadow map
-  renderer.drawShadow(programShadow, lightVP, worldMatrix);
-
-  // restaura
-  gl.cullFace(gl.BACK);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-
-  
-
-
-  // 1) PLANETA (OPACO)
-  gl.useProgram(programPlanet.program);
-  gl.bindVertexArray(sphereVaoPlanet);
-
-  twgl.setUniforms(programPlanet, {
-    u_viewProjection: viewProjection,
-    u_world: worldMatrix,
-
-    u_baseRadius: data.radius,
-    u_noiseAmp: data.planetNoiseAmp,
-    u_noiseFreq: data.planetNoiseFreq,
-    u_seed: data.seed,
-    u_octaves: data.octaves,
-
-    u_ocean: data.ocean,
-    u_beach: data.beach,
-    u_mountain: data.mountain,
-    u_snow: data.snow,
-    u_texGrass: texGrass,
-    u_texRock: texRock,
-    u_texScale: 0.3, 
-
-    u_lightDir: lightDir,
-    u_cameraPos: cameraPosition,
-    u_ambient: 0.03,   // baixo para “lado escuro quase preto”
-    u_diffuse: 1.1,
-    u_shadowMap: shadowDepthTexture,
-    u_lightVP: lightVP,
-  });
-
-  twgl.drawBufferInfo(gl, sphereBufferInfo, data.triangles ? gl.TRIANGLES : gl.LINES);
-
-  // 2) OBJETOS (OPACOS) — ANTES DA ÁGUA
-  gl.disable(gl.BLEND);
-  gl.depthMask(true);
-  renderer.update(dt, t);
-  renderer.drawObjects(viewProjection, worldMatrix, {
-    u_lightDir: lightDir,
-  });
-
-  // 3) ÁGUA (TRANSPARENTE) — POR ÚLTIMO
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-  //  água NÃO escreve depth, senão “some” peixe/árvore atrás dela
-  gl.depthMask(false);
-  gl.depthFunc(gl.LEQUAL);
-
-  gl.useProgram(programWater.program);
-  gl.bindVertexArray(sphereVaoWater);
-
-  twgl.setUniforms(programWater, {
-    u_viewProjection: viewProjection,
-    u_world: worldMatrix,
-
-    u_baseRadius: data.radius,
-    u_waterOffset: data.waterOffset,
-    u_time: t,
-
-    u_waveAmp: data.waveAmp,
-    u_waveLen: data.waveLen,
-    u_waveSpeed: data.waveSpeed,
-
-    u_noiseAmp: data.waterNoiseAmp,
-    u_noiseFreq: data.waterNoiseFreq,
-    u_seed: data.seed,
-    u_octaves: Math.max(1, Math.min(10, data.octaves)),
-
-    u_cameraPos: cameraPosition,
-    u_alpha: data.waterAlpha,
-    u_fresnelPow: data.fresnelPow,
-    u_specPow: data.specPow,
-    u_specStrength: data.specStrength,
-    u_deepness: data.deepness,
-  });
-
-  twgl.drawBufferInfo(gl, sphereBufferInfo, gl.TRIANGLES);
-
-  gl.enable(gl.BLEND);
-
-// opcional: dá pra deixar um brilho mais "mágico"
- gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-
-gl.enable(gl.DEPTH_TEST);
-// não escreve no depth pra não “sumir” atrás de si mesmo
-gl.depthMask(false);
-
-gl.useProgram(programPollen.program);
-gl.bindVertexArray(pollenVao);
-
-twgl.setUniforms(programPollen, {
-  u_viewProjection: viewProjection,
-  u_world: worldMatrix,
-  u_time: t,
-  u_baseRadius: data.radius,
-  u_waterOffset: data.waterOffset,
-});
-
-gl.drawArrays(gl.POINTS, 0, POLLEN_COUNT);
-
-// restaura
-gl.depthMask(true);
-gl.disable(gl.BLEND);
-
-  // --- restaura estados (boa prática) ---
-  gl.depthMask(true);
-  gl.depthFunc(gl.LESS);
-  gl.disable(gl.BLEND);
-  gl.bindVertexArray(null);
-
-  requestAnimationFrame(renderFrame);
-}
-
 
   requestAnimationFrame(renderFrame);
 }

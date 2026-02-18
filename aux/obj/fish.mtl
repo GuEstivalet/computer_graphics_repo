@@ -20,7 +20,7 @@ Ke 0.0 0.0 0.0
 Ni 1.0
 d 1
 illum 1
-map_Kd lambert5_diffuse.png
+map_Kd fish.png
 
 newmtl mat2
 Ns 250

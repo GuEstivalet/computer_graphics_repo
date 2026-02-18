@@ -614,123 +614,14 @@ export const vsShadow = `#version 300 es
 precision highp float;
 
 in vec4 a_position;
-in vec3 a_normal;
-
-uniform mat4 u_lightVP;
-uniform mat4 u_world;
-
-// --- MESMOS UNIFORMS DO PLANETA (pra bater 1:1) ---
-uniform float u_baseRadius;
-uniform float u_noiseAmp;
-uniform float u_noiseFreq;
-uniform float u_seed;
-uniform int   u_octaves;
-
-// se você estiver usando o “relevo por bioma” no vsPlanet, inclua também:
-uniform float u_ocean;
-uniform float u_beach;
-uniform float u_mountain;
-uniform float u_snow;
-
-uniform float u_oceanDepth;
-uniform float u_landLift;
-uniform float u_mountainLift;
-uniform float u_biomeBlend;
-
-// ---------- Noise (igual ao vsPlanet) ----------
-float hash31(vec3 p) {
-  p = fract(p * 0.1031);
-  p += dot(p, p.yzx + 33.33);
-  return fract((p.x + p.y) * p.z);
-}
-
-float valueNoise(vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  vec3 u = f * f * (3.0 - 2.0 * f);
-
-  float n000 = hash31(i + vec3(0,0,0));
-  float n100 = hash31(i + vec3(1,0,0));
-  float n010 = hash31(i + vec3(0,1,0));
-  float n110 = hash31(i + vec3(1,1,0));
-  float n001 = hash31(i + vec3(0,0,1));
-  float n101 = hash31(i + vec3(1,0,1));
-  float n011 = hash31(i + vec3(0,1,1));
-  float n111 = hash31(i + vec3(1,0,1) + vec3(0,0,1)); // (equivalente ao i+vec3(1,1,1))
-
-  float nx00 = mix(n000, n100, u.x);
-  float nx10 = mix(n010, n110, u.x);
-  float nx01 = mix(n001, n101, u.x);
-  float nx11 = mix(n011, n111, u.x);
-
-  float nxy0 = mix(nx00, nx10, u.y);
-  float nxy1 = mix(nx01, nx11, u.y);
-
-  return mix(nxy0, nxy1, u.z);
-}
-
-float fbm(vec3 p, float seed, int octaves) {
-  float sum = 0.0;
-  float amp = 0.5;
-  float freq = 1.0;
-  vec3 off = vec3(seed, seed*1.37, seed*2.11);
-
-  for (int i = 0; i < 12; i++) {
-    if (i >= octaves) break;
-    sum += (valueNoise(p * freq + off) * 2.0 - 1.0) * amp;
-    freq *= 2.0;
-    amp  *= 0.5;
-  }
-  return sum;
-}
-
-float band(float a, float b, float x) { return smoothstep(a, b, x); }
-
-void main() {
-  vec3 nLocal = normalize(a_normal);
-
-  // 1) ruido base igual ao vsPlanet
-  float n = fbm(nLocal * u_noiseFreq, u_seed, u_octaves);
-  float h = n * u_noiseAmp;          // altura relativa
-  float radius = u_baseRadius + h;   // raio final (base)
-
-  // 2) Se no seu vsPlanet você tem relevo por bioma, APLIQUE IGUAL AQUI
-  //    (se não tiver, pode deixar que ainda vai corrigir bastante)
-  float tOcean = band(u_ocean-0.5,    u_ocean+0.5,    h);
-  float tBeach = band(u_beach-0.5,    u_beach+0.5,    h);
-  float tMount = band(u_mountain-0.5, u_mountain+0.5, h);
-
-  float biomeLift = 0.0;
-  biomeLift += (-u_oceanDepth) * tOcean;
-  biomeLift += ( u_landLift)   * tBeach;
-  biomeLift += ( u_mountainLift) * tMount;
-
-  radius += biomeLift * u_biomeBlend;
-
-  vec3 posLocal = nLocal * radius;
-
-  vec4 worldPos = u_world * vec4(posLocal, 1.0);
-  gl_Position = u_lightVP * worldPos;
-}
-`;
-
-export const fsShadow = `#version 300 es
-precision highp float;
-void main() { }
-`;
-
-export const vsShadowObj = `#version 300 es
-precision highp float;
-
-in vec4 a_position;
 
 in vec4 a_iWorld0;
 in vec4 a_iWorld1;
 in vec4 a_iWorld2;
 in vec4 a_iWorld3;
 
-uniform mat4 u_lightVP;
-uniform mat4 u_world;   // rotação do planeta
+uniform mat4 u_world;     // rotação do planeta
+uniform mat4 u_lightVP;   // lightProj * lightView
 
 mat4 instanceWorld() {
   return mat4(a_iWorld0, a_iWorld1, a_iWorld2, a_iWorld3);
@@ -738,8 +629,14 @@ mat4 instanceWorld() {
 
 void main() {
   mat4 iw = instanceWorld();
-  mat4 W = u_world * iw;
-  vec4 worldPos = W * a_position;
-  gl_Position = u_lightVP * worldPos;
+  mat4 W  = u_world * iw;
+  gl_Position = u_lightVP * (W * a_position);
 }
 `;
+
+
+export const fsShadow = `#version 300 es
+precision highp float;
+void main() { }
+`;
+

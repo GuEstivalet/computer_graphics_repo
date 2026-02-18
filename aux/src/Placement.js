@@ -18,24 +18,39 @@ export function basisFromUp(up) {
 }
 
 
-// altura do terreno para um "up" (use sua displacedRadius/fbm3 se já tem)
 export function terrainRadiusAtUp(displacedRadiusFn, up, data) {
   return displacedRadiusFn(up, data.radius, data.planetNoiseAmp, data.planetNoiseFreq, data.seed, data.octaves ?? 6);
 }
 
-// critérios de bioma por altura (h = r - baseRadius)
-export function isGreen(displacedRadiusFn, up, data) {
-  const r = terrainRadiusAtUp(displacedRadiusFn, up, data);
+// critérios de bioma por altura
+export function isGreen(displacedRadius, up, data) {
+  const r = displacedRadius(
+    up,
+    data.radius,
+    data.planetNoiseAmp,
+    data.planetNoiseFreq,
+    data.seed,
+    data.octaves ?? 6
+  );
+
   const h = r - data.radius;
-  return h > (data.ocean - 2.0) && h < (data.mountain + 5.0);
+
+  const margin = 0.6; 
+
+  // verde só se estiver longe de oceano e montanha
+  return (
+    h > data.beach + margin &&
+    h < data.mountain - margin
+  );
 }
+
 export function isWater(displacedRadiusFn, up, data) {
   const r = terrainRadiusAtUp(displacedRadiusFn, up, data);
   const h = r - data.radius;
-  return h < data.ocean; // “água”
+  return h < data.ocean; 
 }
 
-// objeto instanciado: guarda up + posição + yaw etc.
+// objeto instanciado: guarda up + posição + yaw 
 export function makeTreeInstance(displacedRadiusFn, up, data) {
   const { right, fwd } = basisFromUp(up);
   const r = terrainRadiusAtUp(displacedRadiusFn, up, data);
